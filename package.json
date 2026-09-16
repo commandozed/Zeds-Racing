@@ -1,0 +1,16 @@
+{
+  "name": "goldcomp-backend",
+  "version": "0.2.0",
+  "description": "Express + Postgres (Supabase) backend that receives gold snapshots and maintains the GoldComp leaderboard data.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "pg": "^8.13.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
