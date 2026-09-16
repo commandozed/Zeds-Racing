@@ -183,6 +183,57 @@ app.get("/api/history", async (req, res) => {
   }
 });
 
+// Ranks characters by gold gained over roughly the last hour. For each
+// character this compares their most recent submission to whichever
+// submission was current as of one hour ago, and sorts by the
+// difference. Characters with no submission older than an hour yet are
+// excluded -- there's no honest baseline to compare against for them.
+app.get("/api/leaderboard/hourly", async (req, res) => {
+  try {
+    const result = await pool.query(`
+      WITH latest AS (
+        SELECT DISTINCT ON (character_name, realm_name)
+          character_name, realm_name, gold AS latest_gold, submitted_at AS latest_at
+        FROM submissions
+        ORDER BY character_name, realm_name, submitted_at DESC
+      ),
+      baseline AS (
+        SELECT DISTINCT ON (character_name, realm_name)
+          character_name, realm_name, gold AS baseline_gold, submitted_at AS baseline_at
+        FROM submissions
+        WHERE submitted_at <= now() - interval '1 hour'
+        ORDER BY character_name, realm_name, submitted_at DESC
+      )
+      SELECT
+        l.character_name,
+        l.realm_name,
+        l.latest_gold,
+        b.baseline_gold,
+        (l.latest_gold - b.baseline_gold) AS gained,
+        b.baseline_at
+      FROM latest l
+      JOIN baseline b
+        ON b.character_name = l.character_name AND b.realm_name = l.realm_name
+      ORDER BY gained DESC
+      LIMIT 10
+    `);
+
+    const hourly = result.rows.map((row) => ({
+      characterName: row.character_name,
+      realmName: row.realm_name,
+      gained: Number(row.gained),
+      currentGold: Number(row.latest_gold),
+      baselineGold: Number(row.baseline_gold),
+      baselineAt: row.baseline_at,
+    }));
+
+    res.json({ ok: true, hourly });
+  } catch (err) {
+    console.error("Database error:", err.message);
+    res.status(500).json({ error: "Failed to load hourly leaderboard" });
+  }
+});
+
 // Simple health check, handy for confirming the server is up.
 app.get("/api/health", (req, res) => {
   res.json({ ok: true });

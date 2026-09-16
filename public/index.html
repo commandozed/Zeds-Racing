@@ -285,6 +285,73 @@
     color: var(--ink-brown-soft);
     font-size: 0.9rem;
   }
+
+  /* ---- Hourly gains panel ---- */
+
+  .hourly-panel {
+    background: rgba(238, 227, 200, 0.06);
+    border: 1px solid rgba(238, 227, 200, 0.14);
+    border-radius: 6px;
+    margin-bottom: 1.75rem;
+    overflow: hidden;
+  }
+
+  .hourly-header {
+    padding: 0.9rem 1.4rem 0.7rem;
+    font-family: 'Cinzel', serif;
+    font-size: 0.85rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    color: var(--parchment);
+    text-transform: uppercase;
+    opacity: 0.85;
+  }
+
+  .hourly-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.55rem 1.4rem;
+    font-size: 0.88rem;
+    border-top: 1px solid rgba(238, 227, 200, 0.1);
+  }
+
+  .hourly-rank {
+    font-family: 'Cinzel', serif;
+    font-weight: 700;
+    color: #9aa3af;
+    margin-right: 0.6rem;
+    font-size: 0.85rem;
+  }
+
+  .hourly-name {
+    color: var(--parchment);
+    font-weight: 500;
+  }
+
+  .hourly-name .realm-name {
+    color: #8b93a1;
+    margin-top: 0;
+  }
+
+  .hourly-gain {
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  .hourly-gain.positive { color: #7fbf6a; }
+  .hourly-gain.negative { color: #c96b5a; }
+  .hourly-gain.zero { color: #9aa3af; }
+
+  .hourly-empty {
+    padding: 1rem 1.4rem 1.2rem;
+    font-size: 0.85rem;
+    color: #9aa3af;
+  }
+
+  .hourly-panel[hidden] { display: none; }
 </style>
 </head>
 <body>
@@ -294,6 +361,11 @@
       <h1>GoldComp Leaderboard</h1>
       <p class="subtitle" id="subtitle">Loading standings&hellip;</p>
     </header>
+
+    <div class="hourly-panel" id="hourlyPanel" hidden>
+      <div class="hourly-header">Most Gold Made · Last Hour</div>
+      <div id="hourlyBody"></div>
+    </div>
 
     <div class="ledger">
       <table id="table" hidden>
@@ -353,6 +425,47 @@
       if (hours < 24) return hours + (hours === 1 ? ' hour ago' : ' hours ago');
       const days = Math.floor(hours / 24);
       return days + (days === 1 ? ' day ago' : ' days ago');
+    }
+
+    function formatSignedGold(copper) {
+      const sign = copper > 0 ? '+' : copper < 0 ? '-' : '';
+      const { gold, silver, copper: c } = formatGold(Math.abs(copper));
+      return `${sign}${gold}<span class="unit">g</span> ${silver}<span class="unit">s</span> ${c}<span class="unit">c</span>`;
+    }
+
+    async function loadHourlyLeaderboard() {
+      const panel = document.getElementById('hourlyPanel');
+      const body = document.getElementById('hourlyBody');
+
+      try {
+        const response = await fetch('/api/leaderboard/hourly');
+        if (!response.ok) throw new Error('Request failed');
+        const data = await response.json();
+        const rows = data.hourly || [];
+
+        if (rows.length === 0) {
+          panel.hidden = false;
+          body.innerHTML = '<div class="hourly-empty">Not enough history yet -- check back in an hour.</div>';
+          return;
+        }
+
+        panel.hidden = false;
+        body.innerHTML = rows.map((row, index) => {
+          const cls = row.gained > 0 ? 'positive' : row.gained < 0 ? 'negative' : 'zero';
+          return `
+            <div class="hourly-row">
+              <span class="hourly-name">
+                <span class="hourly-rank">${index + 1}</span>${escapeHtml(row.characterName)}
+                <span class="realm-name">${escapeHtml(row.realmName)}</span>
+              </span>
+              <span class="hourly-gain ${cls}">${formatSignedGold(row.gained)}</span>
+            </div>
+          `;
+        }).join('');
+
+      } catch (err) {
+        panel.hidden = true;
+      }
     }
 
     async function loadLeaderboard() {
@@ -496,7 +609,9 @@
     }
 
     loadLeaderboard();
+    loadHourlyLeaderboard();
     setInterval(loadLeaderboard, 15000);
+    setInterval(loadHourlyLeaderboard, 15000);
   </script>
 
 </body>
