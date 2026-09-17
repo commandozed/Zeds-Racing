@@ -60,6 +60,42 @@ async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_submissions_character
     ON submissions (character_name, realm_name, submitted_at DESC)
   `);
+
+  // XP race: current standings, including rank and previous_rank so the
+  // leaderboard can show how far each racer moved since the last update.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS xp_characters (
+      id SERIAL PRIMARY KEY,
+      character_name TEXT NOT NULL,
+      realm_name TEXT NOT NULL,
+      character_level INTEGER NOT NULL,
+      current_xp BIGINT NOT NULL,
+      current_xp_max BIGINT,
+      last_updated BIGINT,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      rank INTEGER,
+      previous_rank INTEGER,
+      UNIQUE (character_name, realm_name)
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS xp_submissions (
+      id SERIAL PRIMARY KEY,
+      character_name TEXT NOT NULL,
+      realm_name TEXT NOT NULL,
+      character_level INTEGER NOT NULL,
+      current_xp BIGINT NOT NULL,
+      current_xp_max BIGINT,
+      last_updated BIGINT,
+      submitted_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_xp_submissions_character
+    ON xp_submissions (character_name, realm_name, submitted_at DESC)
+  `);
 }
 
 // ---- Routes ---------------------------------------------------------------
@@ -123,6 +159,111 @@ app.post("/api/submit-gold", async (req, res) => {
     await client.query("ROLLBACK");
     console.error("Database error:", err.message);
     res.status(500).json({ error: "Failed to save gold data" });
+  } finally {
+    client.release();
+  }
+});
+
+// XP race: accepts a character's current level + current-level XP,
+// upserts it, records history, and recomputes everyone's rank so the
+// leaderboard can show movement since the last update.
+app.post("/api/submit-xp", async (req, res) => {
+  const { characterName, realmName, characterLevel, currentXP, currentXPMax, lastUpdated } =
+    req.body || {};
+
+  if (typeof characterName !== "string" || characterName.trim() === "") {
+    return res.status(400).json({ error: "characterName is required" });
+  }
+  if (typeof realmName !== "string" || realmName.trim() === "") {
+    return res.status(400).json({ error: "realmName is required" });
+  }
+  if (typeof characterLevel !== "number" || !Number.isFinite(characterLevel) || characterLevel < 1) {
+    return res.status(400).json({ error: "characterLevel must be a positive number" });
+  }
+  if (typeof currentXP !== "number" || !Number.isFinite(currentXP) || currentXP < 0) {
+    return res.status(400).json({ error: "currentXP must be a non-negative number" });
+  }
+
+  const trimmedCharacter = characterName.trim();
+  const trimmedRealm = realmName.trim();
+  const truncLevel = Math.trunc(characterLevel);
+  const truncXP = Math.trunc(currentXP);
+  const truncXPMax = Number.isFinite(currentXPMax) ? Math.trunc(currentXPMax) : null;
+  const truncLastUpdated = Number.isFinite(lastUpdated) ? Math.trunc(lastUpdated) : null;
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    await client.query(
+      `INSERT INTO xp_characters
+         (character_name, realm_name, character_level, current_xp, current_xp_max, last_updated, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, now())
+       ON CONFLICT (character_name, realm_name)
+       DO UPDATE SET character_level = EXCLUDED.character_level,
+                     current_xp = EXCLUDED.current_xp,
+                     current_xp_max = EXCLUDED.current_xp_max,
+                     last_updated = EXCLUDED.last_updated,
+                     updated_at = EXCLUDED.updated_at`,
+      [trimmedCharacter, trimmedRealm, truncLevel, truncXP, truncXPMax, truncLastUpdated]
+    );
+
+    await client.query(
+      `INSERT INTO xp_submissions
+         (character_name, realm_name, character_level, current_xp, current_xp_max, last_updated, submitted_at)
+       VALUES ($1, $2, $3, $4, $5, $6, now())`,
+      [trimmedCharacter, trimmedRealm, truncLevel, truncXP, truncXPMax, truncLastUpdated]
+    );
+
+    // Recompute the whole field's ranking (level desc, then current-level
+    // XP desc as the same-level tiebreaker), capturing each racer's prior
+    // rank into previous_rank in the same pass so the leaderboard can show
+    // movement since the last update.
+    await client.query(`
+      WITH ranked AS (
+        SELECT id, ROW_NUMBER() OVER (ORDER BY character_level DESC, current_xp DESC) AS new_rank
+        FROM xp_characters
+      )
+      UPDATE xp_characters x
+      SET previous_rank = x.rank,
+          rank = ranked.new_rank
+      FROM ranked
+      WHERE ranked.id = x.id
+    `);
+
+    const saved = await client.query(
+      `SELECT character_name, realm_name, character_level, current_xp, current_xp_max,
+              last_updated, updated_at, rank, previous_rank
+       FROM xp_characters
+       WHERE character_name = $1 AND realm_name = $2`,
+      [trimmedCharacter, trimmedRealm]
+    );
+
+    await client.query("COMMIT");
+
+    const row = saved.rows[0];
+    console.log(
+      `Saved XP for ${row.character_name}-${row.realm_name}: level ${row.character_level}, rank ${row.rank}`
+    );
+
+    res.status(200).json({
+      ok: true,
+      character: {
+        characterName: row.character_name,
+        realmName: row.realm_name,
+        characterLevel: row.character_level,
+        currentXP: Number(row.current_xp),
+        currentXPMax: row.current_xp_max !== null ? Number(row.current_xp_max) : null,
+        lastUpdated: row.last_updated !== null ? Number(row.last_updated) : null,
+        updatedAt: row.updated_at,
+        rank: row.rank,
+        previousRank: row.previous_rank,
+      },
+    });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("Database error:", err.message);
+    res.status(500).json({ error: "Failed to save XP data" });
   } finally {
     client.release();
   }
@@ -231,6 +372,37 @@ app.get("/api/leaderboard/hourly", async (req, res) => {
   } catch (err) {
     console.error("Database error:", err.message);
     res.status(500).json({ error: "Failed to load hourly leaderboard" });
+  }
+});
+
+// Returns the XP race standings, ranked by level then current-level XP.
+// Includes each racer's rank change since the prior update, and how long
+// it's been since their last submission (so the page can flag stale
+// racers who haven't /reload'ed recently).
+app.get("/api/leaderboard/xp", async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT character_name, realm_name, character_level, current_xp, current_xp_max,
+              updated_at, rank, previous_rank
+       FROM xp_characters
+       ORDER BY rank ASC NULLS LAST`
+    );
+
+    const leaderboard = result.rows.map((row) => ({
+      characterName: row.character_name,
+      realmName: row.realm_name,
+      characterLevel: row.character_level,
+      currentXP: Number(row.current_xp),
+      currentXPMax: row.current_xp_max !== null ? Number(row.current_xp_max) : null,
+      updatedAt: row.updated_at,
+      rank: row.rank,
+      previousRank: row.previous_rank, // null means this is their first-ever ranked update
+    }));
+
+    res.json({ ok: true, leaderboard });
+  } catch (err) {
+    console.error("Database error:", err.message);
+    res.status(500).json({ error: "Failed to load XP leaderboard" });
   }
 });
 

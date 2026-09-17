@@ -363,6 +363,38 @@
   }
 
   .hourly-panel[hidden] { display: none; }
+  .nav-tabs {
+    display: flex;
+    justify-content: center;
+    gap: 0.5rem;
+    margin-bottom: 1.75rem;
+  }
+
+  .nav-tabs a {
+    font-family: 'Cinzel', serif;
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    text-decoration: none;
+    padding: 0.5rem 1.2rem;
+    border-radius: 999px;
+    color: #9aa3af;
+    border: 1px solid rgba(238, 227, 200, 0.14);
+    transition: color 0.15s ease, border-color 0.15s ease;
+  }
+
+  .nav-tabs a:hover {
+    color: var(--parchment);
+    border-color: rgba(238, 227, 200, 0.3);
+  }
+
+  .nav-tabs a.active {
+    color: var(--ink-brown);
+    background: var(--tarnished-gold);
+    border-color: var(--tarnished-gold);
+  }
+
 </style>
 </head>
 <body>
@@ -372,6 +404,11 @@
       <h1>GoldComp Leaderboard</h1>
       <p class="subtitle" id="subtitle">Loading standings&hellip;</p>
     </header>
+
+    <nav class="nav-tabs">
+      <a href="/" class="active">Gold</a>
+      <a href="/xp.html">Experience</a>
+    </nav>
 
     <div class="hourly-panel" id="hourlyPanel" hidden>
       <div class="hourly-header">Most Gold Made · Last Hour</div>

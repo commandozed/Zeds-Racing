@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>GoldComp — XP Race</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink-night: #1c2128;
+    --ink-night-deep: #14171c;
+    --parchment: #eee3c8;
+    --parchment-line: #d9caa3;
+    --ink-brown: #3a2f22;
+    --ink-brown-soft: #6b5c45;
+    --tarnished-gold: #b8862f;
+    --wax-red: #6b1f1f;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background:
+      radial-gradient(ellipse at top, #262c36 0%, var(--ink-night) 45%, var(--ink-night-deep) 100%);
+    font-family: 'Inter', sans-serif;
+    color: var(--parchment);
+    display: flex;
+    justify-content: center;
+    padding: 4.5rem 1.5rem 5rem;
+  }
+
+  .page {
+    width: 100%;
+    max-width: 640px;
+  }
+
+  header {
+    text-align: center;
+    margin-bottom: 2.25rem;
+  }
+
+  h1 {
+    font-family: 'Cinzel', serif;
+    font-weight: 700;
+    font-size: clamp(1.75rem, 4vw, 2.4rem);
+    letter-spacing: 0.02em;
+    margin: 0 0 0.6rem;
+    color: var(--parchment);
+    text-shadow: 0 2px 12px rgba(184, 134, 47, 0.25);
+  }
+
+  .subtitle {
+    font-size: 0.85rem;
+    color: #9aa3af;
+    margin: 0;
+  }
+
+  .nav-tabs {
+    display: flex;
+    justify-content: center;
+    gap: 0.5rem;
+    margin-bottom: 1.75rem;
+  }
+
+  .nav-tabs a {
+    font-family: 'Cinzel', serif;
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    text-decoration: none;
+    padding: 0.5rem 1.2rem;
+    border-radius: 999px;
+    color: #9aa3af;
+    border: 1px solid rgba(238, 227, 200, 0.14);
+    transition: color 0.15s ease, border-color 0.15s ease;
+  }
+
+  .nav-tabs a:hover {
+    color: var(--parchment);
+    border-color: rgba(238, 227, 200, 0.3);
+  }
+
+  .nav-tabs a.active {
+    color: var(--ink-brown);
+    background: var(--tarnished-gold);
+    border-color: var(--tarnished-gold);
+  }
+
+  .section-heading {
+    font-family: 'Cinzel', serif;
+    font-size: 0.85rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    color: var(--parchment);
+    text-transform: uppercase;
+    opacity: 0.85;
+    margin: 0 0 0.6rem 0.2rem;
+  }
+
+  .ledger {
+    background: var(--parchment);
+    border-radius: 6px;
+    box-shadow:
+      0 30px 60px -20px rgba(0, 0, 0, 0.55),
+      0 0 0 1px rgba(0, 0, 0, 0.15);
+    overflow: hidden;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  thead th {
+    font-family: 'Inter', sans-serif;
+    font-weight: 500;
+    font-size: 0.72rem;
+    color: var(--ink-brown-soft);
+    text-align: left;
+    padding: 1.1rem 1.2rem 0.7rem;
+    border-bottom: 1px solid var(--parchment-line);
+  }
+
+  thead th.col-rank { width: 3rem; }
+  thead th.col-delta { text-align: right; width: 4rem; }
+
+  tbody tr {
+    border-bottom: 1px solid var(--parchment-line);
+    transition: background-color 0.15s ease;
+  }
+
+  tbody tr:last-child { border-bottom: none; }
+  tbody tr:hover { background-color: rgba(184, 134, 47, 0.08); }
+  tbody tr.rank-1 { box-shadow: inset 3px 0 0 var(--wax-red); }
+  tbody tr.stale { opacity: 0.55; }
+
+  td {
+    padding: 0.85rem 1.2rem;
+    color: var(--ink-brown);
+    font-size: 0.92rem;
+    vertical-align: middle;
+  }
+
+  .rank-number {
+    font-family: 'Cinzel', serif;
+    font-weight: 700;
+    font-size: 1.05rem;
+    color: var(--ink-brown-soft);
+  }
+
+  tr.rank-1 .rank-number { color: var(--wax-red); }
+
+  .racer-name {
+    font-weight: 600;
+    color: var(--ink-brown);
+  }
+
+  .racer-meta {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.78rem;
+    color: var(--ink-brown-soft);
+    margin-top: 0.15rem;
+  }
+
+  .stale-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: #c96b5a;
+    color: #fff;
+    font-size: 0.65rem;
+    font-weight: 700;
+    cursor: help;
+  }
+
+  .level-badge {
+    font-family: 'Cinzel', serif;
+    font-weight: 700;
+    font-size: 0.82rem;
+    color: var(--tarnished-gold);
+    white-space: nowrap;
+  }
+
+  .xp-bar-track {
+    margin-top: 0.35rem;
+    width: 120px;
+    height: 6px;
+    border-radius: 999px;
+    background: rgba(58, 47, 34, 0.12);
+    overflow: hidden;
+  }
+
+  .xp-bar-fill {
+    height: 100%;
+    background: var(--tarnished-gold);
+    border-radius: 999px;
+  }
+
+  .xp-fraction {
+    font-size: 0.72rem;
+    color: var(--ink-brown-soft);
+    margin-top: 0.2rem;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .delta {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    font-weight: 700;
+    font-size: 0.88rem;
+    white-space: nowrap;
+  }
+
+  .delta.up { color: #3a8f3a; }
+  .delta.down { color: #a3392c; }
+  .delta.same { color: var(--ink-brown-soft); }
+  .delta.new { color: var(--tarnished-gold); font-size: 0.72rem; font-weight: 600; }
+
+  .empty-state,
+  .error-state {
+    padding: 3rem 1.5rem;
+    text-align: center;
+    color: var(--ink-brown-soft);
+    font-size: 0.95rem;
+    line-height: 1.5;
+  }
+
+  footer {
+    text-align: center;
+    margin-top: 1.5rem;
+    font-size: 0.78rem;
+    color: #6b7280;
+  }
+</style>
+</head>
+<body>
+
+  <div class="page">
+    <header>
+      <h1>GoldComp — XP Race</h1>
+      <p class="subtitle" id="subtitle">Loading standings&hellip;</p>
+    </header>
+
+    <nav class="nav-tabs">
+      <a href="/">Gold</a>
+      <a href="/xp.html" class="active">Experience</a>
+    </nav>
+
+    <p class="section-heading">Race Standings</p>
+    <div class="ledger">
+      <table id="table" hidden>
+        <thead>
+          <tr>
+            <th class="col-rank">Rank</th>
+            <th>Racer</th>
+            <th class="col-delta">&Delta;</th>
+          </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+      <div class="empty-state" id="emptyState" hidden>
+        No racers yet. Opt in with /goldcomp xp on and check back.
+      </div>
+      <div class="error-state" id="errorState" hidden>
+        Couldn't reach the leaderboard right now. Make sure the GoldComp server is running.
+      </div>
+    </div>
+
+    <footer id="footer"></footer>
+  </div>
+
+  <script>
+    const STALE_THRESHOLD_MS = 30 * 60 * 1000; // 30 minutes
+
+    function relativeTime(isoString) {
+      const then = new Date(isoString).getTime();
+      const diffMs = Date.now() - then;
+      const minutes = Math.floor(diffMs / 60000);
+      if (minutes < 1) return 'just now';
+      if (minutes < 60) return minutes + (minutes === 1 ? ' minute ago' : ' minutes ago');
+      const hours = Math.floor(minutes / 60);
+      if (hours < 24) return hours + (hours === 1 ? ' hour ago' : ' hours ago');
+      const days = Math.floor(hours / 24);
+      return days + (days === 1 ? ' day ago' : ' days ago');
+    }
+
+    function escapeHtml(str) {
+      const div = document.createElement('div');
+      div.textContent = str;
+      return div.innerHTML;
+    }
+
+    function renderDelta(rank, previousRank) {
+      if (previousRank === null || previousRank === undefined) {
+        return '<span class="delta new">NEW</span>';
+      }
+      const diff = previousRank - rank; // positive = moved up (toward rank 1)
+      if (diff > 0) return `<span class="delta up">&#9650; ${diff}</span>`;
+      if (diff < 0) return `<span class="delta down">&#9660; ${Math.abs(diff)}</span>`;
+      return '<span class="delta same">&mdash;</span>';
+    }
+
+    async function loadLeaderboard() {
+      const subtitle = document.getElementById('subtitle');
+      const table = document.getElementById('table');
+      const tbody = document.getElementById('tbody');
+      const emptyState = document.getElementById('emptyState');
+      const errorState = document.getElementById('errorState');
+      const footer = document.getElementById('footer');
+
+      try {
+        const response = await fetch('/api/leaderboard/xp');
+        if (!response.ok) throw new Error('Request failed');
+        const data = await response.json();
+        const rows = data.leaderboard || [];
+
+        errorState.hidden = true;
+
+        if (rows.length === 0) {
+          table.hidden = true;
+          emptyState.hidden = false;
+          subtitle.textContent = 'No entries yet';
+          footer.textContent = '';
+          return;
+        }
+
+        emptyState.hidden = true;
+        table.hidden = false;
+        tbody.innerHTML = '';
+
+        rows.forEach((row) => {
+          const rank = row.rank;
+          const isStale = (Date.now() - new Date(row.updatedAt).getTime()) > STALE_THRESHOLD_MS;
+          const pct = row.currentXPMax ? Math.min(100, Math.round((row.currentXP / row.currentXPMax) * 100)) : 0;
+
+          const tr = document.createElement('tr');
+          tr.className = 'rank-' + rank + (isStale ? ' stale' : '');
+
+          const staleBadge = isStale
+            ? `<span class="stale-badge" title="No update in over 30 minutes -- last seen ${relativeTime(row.updatedAt)}">!</span>`
+            : '';
+
+          tr.innerHTML = `
+            <td class="rank-number">${rank}</td>
+            <td>
+              <span class="racer-name">${escapeHtml(row.characterName)}</span>
+              <div class="racer-meta">
+                <span class="level-badge">Lv ${row.characterLevel}</span>
+                <span>${escapeHtml(row.realmName)}</span>
+                ${staleBadge}
+              </div>
+              <div class="xp-bar-track"><div class="xp-bar-fill" style="width:${pct}%"></div></div>
+              <div class="xp-fraction">${row.currentXP.toLocaleString('en-US')} / ${row.currentXPMax ? row.currentXPMax.toLocaleString('en-US') : '?'} XP</div>
+            </td>
+            <td class="delta">${renderDelta(rank, row.previousRank)}</td>
+          `;
+
+          tbody.appendChild(tr);
+        });
+
+        subtitle.textContent = rows.length + (rows.length === 1 ? ' racer' : ' racers');
+        footer.textContent = 'Rows fade when a racer hasn\'t reloaded in over 30 minutes.';
+
+      } catch (err) {
+        table.hidden = true;
+        emptyState.hidden = true;
+        errorState.hidden = false;
+        subtitle.textContent = '';
+        footer.textContent = '';
+      }
+    }
+
+    loadLeaderboard();
+    setInterval(loadLeaderboard, 15000);
+  </script>
+
+</body>
+</html>
