@@ -1,5 +1,5 @@
 // server.js
-// Express backend for GoldComp. Accepts gold snapshots from the desktop
+// Express backend for Zeds Racing. Accepts gold snapshots from the desktop
 // watcher and upserts them into a Postgres database (Supabase), keyed by
 // character + realm. Every submission is also kept permanently in a
 // submissions table, which powers the leaderboard's history view.
@@ -862,7 +862,7 @@ app.get("/api/health", (req, res) => {
 initDb()
   .then(() => {
     app.listen(PORT, () => {
-      console.log(`GoldComp backend listening on http://localhost:${PORT}`);
+      console.log(`Zeds Racing backend listening on http://localhost:${PORT}`);
     });
   })
   .catch((err) => {
