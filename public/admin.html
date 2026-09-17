@@ -247,6 +247,17 @@
       </div>
     </div>
 
+    <p class="section-heading">Class &amp; Race Randomizer</p>
+    <div class="ledger">
+      <div class="timer-row">
+        <span class="timer-label">XP Race Randomizer</span>
+        <div class="timer-controls">
+          <button class="timer-set-btn" id="spinRandomizerBtn">Spin</button>
+        </div>
+        <span class="timer-status" id="randomizerStatus">Triggers the wheel spin on the XP race page. Result is hidden until it lands, even here.</span>
+      </div>
+    </div>
+
     <p class="section-heading">Gold Competition</p>
     <div class="ledger" id="goldList">
       <div class="empty-note">Enter the admin password and click Load.</div>
@@ -460,6 +471,33 @@
         setStatus(`Failed to reset ${label}: ` + err.message, true);
       }
     }
+
+    async function spinRandomizer() {
+      const confirmed = confirm(
+        'Spin the class/race randomizer? This will roll a new result and start the reveal animation on the XP race page.'
+      );
+      if (!confirmed) return;
+
+      try {
+        const response = await fetch('/api/admin/spin-randomizer', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ adminPassword: getPassword() }),
+        });
+        const data = await response.json().catch(() => ({}));
+
+        if (!response.ok) {
+          setStatus('Failed to spin randomizer: ' + (data.error || response.statusText), true);
+          return;
+        }
+
+        setStatus('Randomizer started -- check the XP race page for the reveal.', false);
+      } catch (err) {
+        setStatus('Failed to spin randomizer: ' + err.message, true);
+      }
+    }
+
+    document.getElementById('spinRandomizerBtn').addEventListener('click', spinRandomizer);
 
     document.getElementById('goldSetTimerBtn').addEventListener('click', () => setRaceTimer('gold'));
     document.getElementById('goldClearTimerBtn').addEventListener('click', () => clearRaceTimer('gold'));
