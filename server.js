@@ -128,6 +128,12 @@ async function initDb() {
     )
   `);
 
+  // Migration: these columns were added after the table already existed
+  // in some deployments, so add them explicitly rather than relying on
+  // CREATE TABLE IF NOT EXISTS, which is a no-op on an existing table.
+  await pool.query(`ALTER TABLE xp_characters ADD COLUMN IF NOT EXISTS character_race TEXT`);
+  await pool.query(`ALTER TABLE xp_characters ADD COLUMN IF NOT EXISTS class_name TEXT`);
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS xp_submissions (
       id SERIAL PRIMARY KEY,
@@ -265,8 +271,16 @@ app.post("/api/submit-gold", async (req, res) => {
 // upserts it, records history, and recomputes everyone's rank so the
 // leaderboard can show movement since the last update.
 app.post("/api/submit-xp", async (req, res) => {
-  const { characterName, realmName, characterLevel, currentXP, currentXPMax, lastUpdated } =
-    req.body || {};
+  const {
+    characterName,
+    realmName,
+    characterLevel,
+    currentXP,
+    currentXPMax,
+    lastUpdated,
+    characterRace,
+    characterClassName,
+  } = req.body || {};
 
   if (!(await isSubmissionWindowOpen("xp"))) {
     return res.status(403).json({ error: "The XP race has ended. Submissions are closed." });
@@ -291,6 +305,11 @@ app.post("/api/submit-xp", async (req, res) => {
   const truncXP = Math.trunc(currentXP);
   const truncXPMax = Number.isFinite(currentXPMax) ? Math.trunc(currentXPMax) : null;
   const truncLastUpdated = Number.isFinite(lastUpdated) ? Math.trunc(lastUpdated) : null;
+  const race = typeof characterRace === "string" && characterRace.trim() !== "" ? characterRace.trim() : null;
+  const className =
+    typeof characterClassName === "string" && characterClassName.trim() !== ""
+      ? characterClassName.trim()
+      : null;
 
   const client = await pool.connect();
   try {
@@ -298,15 +317,17 @@ app.post("/api/submit-xp", async (req, res) => {
 
     await client.query(
       `INSERT INTO xp_characters
-         (character_name, realm_name, character_level, current_xp, current_xp_max, last_updated, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, now())
+         (character_name, realm_name, character_level, current_xp, current_xp_max, last_updated, updated_at, character_race, class_name)
+       VALUES ($1, $2, $3, $4, $5, $6, now(), $7, $8)
        ON CONFLICT (character_name, realm_name)
        DO UPDATE SET character_level = EXCLUDED.character_level,
                      current_xp = EXCLUDED.current_xp,
                      current_xp_max = EXCLUDED.current_xp_max,
                      last_updated = EXCLUDED.last_updated,
-                     updated_at = EXCLUDED.updated_at`,
-      [trimmedCharacter, trimmedRealm, truncLevel, truncXP, truncXPMax, truncLastUpdated]
+                     updated_at = EXCLUDED.updated_at,
+                     character_race = EXCLUDED.character_race,
+                     class_name = EXCLUDED.class_name`,
+      [trimmedCharacter, trimmedRealm, truncLevel, truncXP, truncXPMax, truncLastUpdated, race, className]
     );
 
     await client.query(
@@ -334,7 +355,7 @@ app.post("/api/submit-xp", async (req, res) => {
 
     const saved = await client.query(
       `SELECT character_name, realm_name, character_level, current_xp, current_xp_max,
-              last_updated, updated_at, rank, previous_rank
+              last_updated, updated_at, rank, previous_rank, character_race, class_name
        FROM xp_characters
        WHERE character_name = $1 AND realm_name = $2`,
       [trimmedCharacter, trimmedRealm]
@@ -359,6 +380,8 @@ app.post("/api/submit-xp", async (req, res) => {
         updatedAt: row.updated_at,
         rank: row.rank,
         previousRank: row.previous_rank,
+        characterRace: row.character_race,
+        characterClassName: row.class_name,
       },
     });
   } catch (err) {
@@ -484,7 +507,7 @@ app.get("/api/leaderboard/xp", async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT character_name, realm_name, character_level, current_xp, current_xp_max,
-              updated_at, rank, previous_rank
+              updated_at, rank, previous_rank, character_race, class_name
        FROM xp_characters
        ORDER BY rank ASC NULLS LAST`
     );
@@ -498,6 +521,8 @@ app.get("/api/leaderboard/xp", async (req, res) => {
       updatedAt: row.updated_at,
       rank: row.rank,
       previousRank: row.previous_rank, // null means this is their first-ever ranked update
+      characterRace: row.character_race,
+      characterClassName: row.class_name,
     }));
 
     res.json({ ok: true, leaderboard });

@@ -222,6 +222,26 @@
     background: linear-gradient(to top, var(--parchment), transparent);
   }
 
+  .wheel-waiting {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--parchment);
+    font-family: 'Inter', sans-serif;
+    font-size: 0.8rem;
+    color: var(--ink-brown-soft);
+    z-index: 3;
+    transition: opacity 0.4s ease;
+  }
+
+  .wheel-waiting[hidden] { display: none; }
+
+  .wheel.locked {
+    box-shadow: 0 0 0 2px var(--tarnished-gold), 0 20px 40px -15px rgba(0, 0, 0, 0.5);
+  }
+
   .randomizer-result {
     background: var(--parchment);
     border-radius: 6px;
@@ -361,6 +381,13 @@
     font-variant-numeric: tabular-nums;
   }
 
+  .racer-race-class {
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--tarnished-gold);
+    margin-top: 0.15rem;
+  }
+
   .delta {
     text-align: right;
     font-variant-numeric: tabular-nums;
@@ -412,19 +439,20 @@
     <div class="randomizer-panel" id="randomizerPanel" hidden>
       <p class="section-heading">Class &amp; Race Randomizer</p>
       <div class="wheels-row" id="wheelsRow">
-        <div class="wheel">
+        <div class="wheel" id="raceWheel">
           <div class="wheel-label">Race</div>
           <div class="wheel-fade-top"></div>
           <div class="wheel-highlight"></div>
           <div class="wheel-items" id="raceWheelItems"></div>
           <div class="wheel-fade-bottom"></div>
         </div>
-        <div class="wheel">
+        <div class="wheel" id="classWheel">
           <div class="wheel-label">Class</div>
           <div class="wheel-fade-top"></div>
           <div class="wheel-highlight"></div>
           <div class="wheel-items" id="classWheelItems"></div>
           <div class="wheel-fade-bottom"></div>
+          <div class="wheel-waiting" id="classWheelWaiting">Up Next&hellip;</div>
         </div>
       </div>
       <div class="randomizer-result" id="randomizerResult" hidden>
@@ -527,6 +555,11 @@
             ? `<span class="stale-badge" title="No update in over 30 minutes -- last seen ${relativeTime(row.updatedAt)}">!</span>`
             : '';
 
+          const raceClassLine =
+            row.characterRace && row.characterClassName
+              ? `<div class="racer-race-class">${escapeHtml(row.characterRace)} ${escapeHtml(row.characterClassName)}</div>`
+              : '';
+
           tr.innerHTML = `
             <td class="rank-number">${rank}</td>
             <td>
@@ -536,6 +569,7 @@
                 <span>${escapeHtml(row.realmName)}</span>
                 ${staleBadge}
               </div>
+              ${raceClassLine}
               <div class="xp-bar-track"><div class="xp-bar-fill" style="width:${pct}%"></div></div>
               <div class="xp-fraction">${row.currentXP.toLocaleString('en-US')} / ${row.currentXPMax ? row.currentXPMax.toLocaleString('en-US') : '?'} XP</div>
             </td>
@@ -663,21 +697,45 @@
 
       const raceEl = document.getElementById('raceWheelItems');
       const classEl = document.getElementById('classWheelItems');
+      const raceWheelBox = document.getElementById('raceWheel');
+      const classWheelBox = document.getElementById('classWheel');
+      const classWaiting = document.getElementById('classWheelWaiting');
       const wheelsRow = document.getElementById('wheelsRow');
       const resultBox = document.getElementById('randomizerResult');
       const resultValue = document.getElementById('randomizerResultValue');
 
       const startMs = new Date(spinStartedAt).getTime();
+      const raceEndsMs = SPIN_DURATION_MS;
+      const classEndsMs = SPIN_DURATION_MS * 2;
+
+      wheelsRow.hidden = false;
+      resultBox.hidden = true;
+      raceWheelBox.classList.remove('locked');
+      classWheelBox.classList.remove('locked');
+      classWaiting.hidden = false;
+      raceEl.style.transform = 'translateY(0px)';
+      classEl.style.transform = 'translateY(0px)';
+
+      if (randomizerAnimFrame) cancelAnimationFrame(randomizerAnimFrame);
 
       function frame() {
         const elapsed = Date.now() - startMs;
-        const t = Math.min(elapsed / SPIN_DURATION_MS, 1);
-        const eased = easeOutCubic(t);
 
-        raceEl.style.transform = `translateY(-${eased * raceReel.finalScroll}px)`;
-        classEl.style.transform = `translateY(-${eased * classReel.finalScroll}px)`;
+        // Phase 1: race wheel spins alone.
+        const raceT = Math.min(elapsed / raceEndsMs, 1);
+        raceEl.style.transform = `translateY(-${easeOutCubic(raceT) * raceReel.finalScroll}px)`;
+        if (raceT >= 1) raceWheelBox.classList.add('locked');
 
-        if (t < 1) {
+        // Phase 2: class wheel only starts once the race wheel has locked in.
+        if (elapsed >= raceEndsMs) {
+          classWaiting.hidden = true;
+          const classElapsed = elapsed - raceEndsMs;
+          const classT = Math.min(classElapsed / SPIN_DURATION_MS, 1);
+          classEl.style.transform = `translateY(-${easeOutCubic(classT) * classReel.finalScroll}px)`;
+          if (classT >= 1) classWheelBox.classList.add('locked');
+        }
+
+        if (elapsed < classEndsMs) {
           randomizerAnimFrame = requestAnimationFrame(frame);
         } else {
           wheelsRow.hidden = true;
@@ -686,9 +744,6 @@
         }
       }
 
-      wheelsRow.hidden = false;
-      resultBox.hidden = true;
-      if (randomizerAnimFrame) cancelAnimationFrame(randomizerAnimFrame);
       frame();
     }
 
