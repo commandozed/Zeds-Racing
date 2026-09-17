@@ -130,6 +130,126 @@
     margin: 0 0 0.6rem 0.2rem;
   }
 
+  /* ---- Class/race randomizer ---- */
+
+  .randomizer-panel {
+    margin-bottom: 2rem;
+  }
+
+  .randomizer-panel[hidden] { display: none; }
+
+  .wheels-row {
+    display: flex;
+    gap: 1rem;
+    justify-content: center;
+  }
+
+  .wheel {
+    position: relative;
+    width: 150px;
+    height: 168px;
+    background: var(--parchment);
+    border-radius: 6px;
+    overflow: hidden;
+    box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.5);
+  }
+
+  .wheel-label {
+    position: absolute;
+    top: 6px;
+    left: 0;
+    right: 0;
+    text-align: center;
+    font-family: 'Cinzel', serif;
+    font-size: 0.62rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--ink-brown-soft);
+    z-index: 2;
+    pointer-events: none;
+  }
+
+  .wheel-items {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    will-change: transform;
+  }
+
+  .wheel-item {
+    height: 56px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Inter', sans-serif;
+    font-weight: 600;
+    font-size: 0.88rem;
+    color: var(--ink-brown);
+    text-align: center;
+    padding: 0 0.5rem;
+  }
+
+  .wheel-highlight {
+    position: absolute;
+    top: 56px;
+    left: 0;
+    right: 0;
+    height: 56px;
+    border-top: 2px solid var(--tarnished-gold);
+    border-bottom: 2px solid var(--tarnished-gold);
+    pointer-events: none;
+    z-index: 1;
+  }
+
+  .wheel-fade-top, .wheel-fade-bottom {
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 30px;
+    pointer-events: none;
+    z-index: 2;
+  }
+
+  .wheel-fade-top {
+    top: 0;
+    background: linear-gradient(to bottom, var(--parchment), transparent);
+  }
+
+  .wheel-fade-bottom {
+    bottom: 0;
+    background: linear-gradient(to top, var(--parchment), transparent);
+  }
+
+  .randomizer-result {
+    background: var(--parchment);
+    border-radius: 6px;
+    padding: 1.4rem 1.2rem;
+    text-align: center;
+    box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.5);
+  }
+
+  .randomizer-result-label {
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--ink-brown-soft);
+    margin-bottom: 0.4rem;
+  }
+
+  .randomizer-result-value {
+    font-family: 'Cinzel', serif;
+    font-weight: 700;
+    font-size: 1.3rem;
+    color: var(--ink-brown);
+  }
+
+  .randomizer-result-value .sep {
+    color: var(--tarnished-gold);
+    margin: 0 0.5rem;
+  }
+
   .ledger {
     background: var(--parchment);
     border-radius: 6px;
@@ -287,6 +407,30 @@
     <div class="countdown-banner" id="countdownBanner" hidden>
       <div class="countdown-label" id="countdownLabel">Race Ends In</div>
       <div class="countdown-time" id="countdownTime"></div>
+    </div>
+
+    <div class="randomizer-panel" id="randomizerPanel" hidden>
+      <p class="section-heading">Class &amp; Race Randomizer</p>
+      <div class="wheels-row" id="wheelsRow">
+        <div class="wheel">
+          <div class="wheel-label">Race</div>
+          <div class="wheel-fade-top"></div>
+          <div class="wheel-highlight"></div>
+          <div class="wheel-items" id="raceWheelItems"></div>
+          <div class="wheel-fade-bottom"></div>
+        </div>
+        <div class="wheel">
+          <div class="wheel-label">Class</div>
+          <div class="wheel-fade-top"></div>
+          <div class="wheel-highlight"></div>
+          <div class="wheel-items" id="classWheelItems"></div>
+          <div class="wheel-fade-bottom"></div>
+        </div>
+      </div>
+      <div class="randomizer-result" id="randomizerResult" hidden>
+        <div class="randomizer-result-label">Your Challenge</div>
+        <div class="randomizer-result-value" id="randomizerResultValue"></div>
+      </div>
     </div>
 
     <p class="section-heading">Race Standings</p>
@@ -469,10 +613,118 @@
       }
     }
 
+    // ---- Class/race randomizer ----
+
+    const SPIN_DURATION_MS = 10000;
+    const ITEM_HEIGHT = 56;
+    const VIEWPORT_HEIGHT = ITEM_HEIGHT * 3;
+    const REEL_LOOPS = 5;
+
+    // Must stay in sync with RANDOMIZER_RACES / RANDOMIZER_CLASSES in
+    // server.js -- used here only to build each wheel's scrolling list.
+    // Original Vanilla Classic race/class set (no Death Knight, Monk,
+    // Demon Hunter, or Evoker -- those didn't exist yet).
+    const RACES = ["Human", "Dwarf", "Night Elf", "Gnome", "Orc", "Tauren", "Troll", "Undead"];
+    const CLASSES = ["Warrior", "Paladin", "Hunter", "Rogue", "Priest", "Mage", "Warlock", "Shaman", "Druid"];
+
+    function easeOutCubic(t) {
+      return 1 - Math.pow(1 - t, 3);
+    }
+
+    /** Builds the repeated item list and the target scroll offset that
+     * lands `winningValue` centered in the viewport at rest. */
+    function buildReel(canonicalList, winningValue) {
+      const winIndex = canonicalList.indexOf(winningValue);
+      const targetPosition = canonicalList.length * REEL_LOOPS + winIndex;
+
+      const items = [];
+      for (let i = 0; i <= targetPosition; i++) {
+        items.push(canonicalList[i % canonicalList.length]);
+      }
+
+      const finalScroll = targetPosition * ITEM_HEIGHT - (VIEWPORT_HEIGHT - ITEM_HEIGHT) / 2;
+      return { items, finalScroll };
+    }
+
+    function renderWheelItems(containerId, items) {
+      const el = document.getElementById(containerId);
+      el.innerHTML = items.map((item) => `<div class="wheel-item">${escapeHtml(item)}</div>`).join('');
+    }
+
+    let randomizerAnimFrame = null;
+    let lastSeenSpinStartedAt = null;
+
+    function runSpinAnimation(race, wowClass, spinStartedAt) {
+      const raceReel = buildReel(RACES, race);
+      const classReel = buildReel(CLASSES, wowClass);
+
+      renderWheelItems('raceWheelItems', raceReel.items);
+      renderWheelItems('classWheelItems', classReel.items);
+
+      const raceEl = document.getElementById('raceWheelItems');
+      const classEl = document.getElementById('classWheelItems');
+      const wheelsRow = document.getElementById('wheelsRow');
+      const resultBox = document.getElementById('randomizerResult');
+      const resultValue = document.getElementById('randomizerResultValue');
+
+      const startMs = new Date(spinStartedAt).getTime();
+
+      function frame() {
+        const elapsed = Date.now() - startMs;
+        const t = Math.min(elapsed / SPIN_DURATION_MS, 1);
+        const eased = easeOutCubic(t);
+
+        raceEl.style.transform = `translateY(-${eased * raceReel.finalScroll}px)`;
+        classEl.style.transform = `translateY(-${eased * classReel.finalScroll}px)`;
+
+        if (t < 1) {
+          randomizerAnimFrame = requestAnimationFrame(frame);
+        } else {
+          wheelsRow.hidden = true;
+          resultBox.hidden = false;
+          resultValue.innerHTML = `${escapeHtml(race)}<span class="sep">&middot;</span>${escapeHtml(wowClass)}`;
+        }
+      }
+
+      wheelsRow.hidden = false;
+      resultBox.hidden = true;
+      if (randomizerAnimFrame) cancelAnimationFrame(randomizerAnimFrame);
+      frame();
+    }
+
+    async function loadRandomizer() {
+      try {
+        const response = await fetch('/api/randomizer');
+        if (!response.ok) throw new Error('Request failed');
+        const data = await response.json();
+        const panel = document.getElementById('randomizerPanel');
+
+        if (!data.active) {
+          panel.hidden = true;
+          lastSeenSpinStartedAt = null;
+          return;
+        }
+
+        panel.hidden = false;
+
+        // Only (re)start the animation if this is a spin we haven't
+        // already started rendering -- avoids restarting from scratch
+        // on every 15s poll.
+        if (data.spinStartedAt !== lastSeenSpinStartedAt) {
+          lastSeenSpinStartedAt = data.spinStartedAt;
+          runSpinAnimation(data.race, data.class, data.spinStartedAt);
+        }
+      } catch (err) {
+        // Leave the panel as-is rather than hiding on a transient blip.
+      }
+    }
+
     loadLeaderboard();
     loadRaceSettings();
+    loadRandomizer();
     setInterval(loadLeaderboard, 15000);
     setInterval(loadRaceSettings, 15000);
+    setInterval(loadRandomizer, 5000);
     setInterval(tickCountdown, 1000);
   </script>
 

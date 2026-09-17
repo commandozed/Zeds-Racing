@@ -24,6 +24,48 @@ if (!ADMIN_PASSWORD) {
   );
 }
 
+// Original Vanilla Classic race/class restrictions -- stable and
+// unchanged since 2004, unlike retail's much looser modern matrix. Unlike
+// the fully-independent retail picks, this list only contains real,
+// creatable combinations, so the randomizer can never land on something
+// impossible (no Tauren Mages here).
+const RANDOMIZER_CLASSIC_COMBOS = [
+  // Alliance
+  { race: "Human", class: "Warrior" }, { race: "Human", class: "Paladin" },
+  { race: "Human", class: "Rogue" }, { race: "Human", class: "Priest" },
+  { race: "Human", class: "Mage" }, { race: "Human", class: "Warlock" },
+  { race: "Dwarf", class: "Warrior" }, { race: "Dwarf", class: "Paladin" },
+  { race: "Dwarf", class: "Hunter" }, { race: "Dwarf", class: "Rogue" },
+  { race: "Dwarf", class: "Priest" },
+  { race: "Night Elf", class: "Warrior" }, { race: "Night Elf", class: "Hunter" },
+  { race: "Night Elf", class: "Rogue" }, { race: "Night Elf", class: "Priest" },
+  { race: "Night Elf", class: "Druid" },
+  { race: "Gnome", class: "Warrior" }, { race: "Gnome", class: "Rogue" },
+  { race: "Gnome", class: "Mage" }, { race: "Gnome", class: "Warlock" },
+  // Horde
+  { race: "Orc", class: "Warrior" }, { race: "Orc", class: "Hunter" },
+  { race: "Orc", class: "Rogue" }, { race: "Orc", class: "Warlock" },
+  { race: "Orc", class: "Shaman" },
+  { race: "Tauren", class: "Warrior" }, { race: "Tauren", class: "Hunter" },
+  { race: "Tauren", class: "Shaman" }, { race: "Tauren", class: "Druid" },
+  { race: "Troll", class: "Warrior" }, { race: "Troll", class: "Hunter" },
+  { race: "Troll", class: "Rogue" }, { race: "Troll", class: "Priest" },
+  { race: "Troll", class: "Mage" }, { race: "Troll", class: "Shaman" },
+  { race: "Undead", class: "Warrior" }, { race: "Undead", class: "Rogue" },
+  { race: "Undead", class: "Priest" }, { race: "Undead", class: "Mage" },
+  { race: "Undead", class: "Warlock" },
+];
+
+// The two wheels still spin through every individual race/class name for
+// visual effect -- only the combo they land on together is constrained
+// to a real one, via RANDOMIZER_CLASSIC_COMBOS above.
+const RANDOMIZER_RACES = ["Human", "Dwarf", "Night Elf", "Gnome", "Orc", "Tauren", "Troll", "Undead"];
+const RANDOMIZER_CLASSES = ["Warrior", "Paladin", "Hunter", "Rogue", "Priest", "Mage", "Warlock", "Shaman", "Druid"];
+
+function pickRandom(list) {
+  return list[Math.floor(Math.random() * list.length)];
+}
+
 const app = express();
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
@@ -111,6 +153,20 @@ async function initDb() {
       race_type TEXT PRIMARY KEY,
       ends_at TIMESTAMPTZ,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `);
+
+  // Single-row table holding the current class/race randomizer result for
+  // the XP race page. "active" false means nothing has been spun yet (or
+  // it was reset), so the page hides the widget entirely.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS xp_randomizer (
+      id INTEGER PRIMARY KEY DEFAULT 1,
+      active BOOLEAN NOT NULL DEFAULT false,
+      race TEXT,
+      class TEXT,
+      spin_started_at TIMESTAMPTZ,
+      CONSTRAINT single_row CHECK (id = 1)
     )
   `);
 }
@@ -705,6 +761,11 @@ app.post("/api/admin/reset-xp-race", async (req, res) => {
        VALUES ('xp', NULL, now())
        ON CONFLICT (race_type) DO UPDATE SET ends_at = NULL, updated_at = now()`
     );
+    await client.query(
+      `INSERT INTO xp_randomizer (id, active, race, class, spin_started_at)
+       VALUES (1, false, NULL, NULL, NULL)
+       ON CONFLICT (id) DO UPDATE SET active = false, race = NULL, class = NULL, spin_started_at = NULL`
+    );
     await client.query("COMMIT");
 
     console.log("Admin reset the XP race.");
@@ -715,6 +776,56 @@ app.post("/api/admin/reset-xp-race", async (req, res) => {
     res.status(500).json({ error: "Failed to reset XP race" });
   } finally {
     client.release();
+  }
+});
+
+// ---- Class/race randomizer for the XP race page --------------------------
+
+// Public: current randomizer state. The page derives its own animation
+// purely from spinStartedAt, so this only needs to be polled occasionally
+// (to notice a newly-triggered spin), not continuously.
+app.get("/api/randomizer", async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT active, race, class, spin_started_at FROM xp_randomizer WHERE id = 1`
+    );
+
+    if (result.rows.length === 0 || !result.rows[0].active) {
+      return res.json({ ok: true, active: false });
+    }
+
+    const row = result.rows[0];
+    res.json({ ok: true, active: true, race: row.race, class: row.class, spinStartedAt: row.spin_started_at });
+  } catch (err) {
+    console.error("Database error:", err.message);
+    res.status(500).json({ error: "Failed to load randomizer state" });
+  }
+});
+
+// Admin: rolls a new random race + class and starts the spin. Doesn't
+// return the result -- the admin sees the reveal on the public page at
+// the same moment as everyone else, preserving the surprise.
+app.post("/api/admin/spin-randomizer", async (req, res) => {
+  if (!checkAdminPassword(req, res)) return;
+
+  const combo = pickRandom(RANDOMIZER_CLASSIC_COMBOS);
+  const race = combo.race;
+  const wowClass = combo.class;
+
+  try {
+    await pool.query(
+      `INSERT INTO xp_randomizer (id, active, race, class, spin_started_at)
+       VALUES (1, true, $1, $2, now())
+       ON CONFLICT (id) DO UPDATE SET active = true, race = EXCLUDED.race,
+         class = EXCLUDED.class, spin_started_at = EXCLUDED.spin_started_at`,
+      [race, wowClass]
+    );
+
+    console.log("Admin triggered the class/race randomizer.");
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("Database error:", err.message);
+    res.status(500).json({ error: "Failed to start randomizer" });
   }
 });
 
