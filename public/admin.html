@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>GoldComp — Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink-night: #1c2128;
+    --ink-night-deep: #14171c;
+    --parchment: #eee3c8;
+    --parchment-line: #d9caa3;
+    --ink-brown: #3a2f22;
+    --ink-brown-soft: #6b5c45;
+    --tarnished-gold: #b8862f;
+    --wax-red: #6b1f1f;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background:
+      radial-gradient(ellipse at top, #262c36 0%, var(--ink-night) 45%, var(--ink-night-deep) 100%);
+    font-family: 'Inter', sans-serif;
+    color: var(--parchment);
+    display: flex;
+    justify-content: center;
+    padding: 4.5rem 1.5rem 5rem;
+  }
+
+  .page {
+    width: 100%;
+    max-width: 560px;
+  }
+
+  header {
+    text-align: center;
+    margin-bottom: 2rem;
+  }
+
+  h1 {
+    font-family: 'Cinzel', serif;
+    font-weight: 700;
+    font-size: clamp(1.5rem, 4vw, 2rem);
+    margin: 0 0 0.4rem;
+  }
+
+  .subtitle {
+    font-size: 0.85rem;
+    color: #9aa3af;
+    margin: 0;
+  }
+
+  .password-panel {
+    background: var(--parchment);
+    border-radius: 6px;
+    padding: 1.2rem 1.4rem;
+    margin-bottom: 1.75rem;
+    display: flex;
+    gap: 0.6rem;
+    align-items: center;
+  }
+
+  .password-panel input {
+    flex: 1;
+    padding: 0.55rem 0.7rem;
+    border-radius: 4px;
+    border: 1px solid var(--parchment-line);
+    font-family: 'Inter', sans-serif;
+    font-size: 0.9rem;
+    background: #fff;
+    color: var(--ink-brown);
+  }
+
+  .password-panel button,
+  .delete-btn {
+    font-family: 'Inter', sans-serif;
+    font-weight: 600;
+    font-size: 0.82rem;
+    border: none;
+    border-radius: 4px;
+    padding: 0.55rem 0.9rem;
+    cursor: pointer;
+  }
+
+  .password-panel button {
+    background: var(--ink-brown);
+    color: var(--parchment);
+  }
+
+  .password-panel button:hover { opacity: 0.9; }
+
+  .status-line {
+    font-size: 0.8rem;
+    margin: 0 0 1.25rem;
+    min-height: 1.2em;
+  }
+
+  .status-line.ok { color: #7fbf6a; }
+  .status-line.err { color: #c96b5a; }
+
+  .section-heading {
+    font-family: 'Cinzel', serif;
+    font-size: 0.85rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    opacity: 0.85;
+    margin: 0 0 0.6rem 0.2rem;
+  }
+
+  .ledger {
+    background: var(--parchment);
+    border-radius: 6px;
+    overflow: hidden;
+    margin-bottom: 2rem;
+  }
+
+  .char-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.8rem 1.2rem;
+    border-bottom: 1px solid var(--parchment-line);
+  }
+
+  .char-row:last-child { border-bottom: none; }
+
+  .char-info { color: var(--ink-brown); font-size: 0.9rem; }
+  .char-info .realm-name { color: var(--ink-brown-soft); font-size: 0.78rem; margin-left: 0.4rem; }
+  .char-value { color: var(--tarnished-gold); font-weight: 600; font-size: 0.85rem; margin-left: 0.5rem; }
+
+  .delete-btn {
+    background: var(--wax-red);
+    color: #fff;
+    flex-shrink: 0;
+  }
+
+  .delete-btn:hover { opacity: 0.85; }
+  .delete-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .empty-note {
+    padding: 1.5rem;
+    text-align: center;
+    color: var(--ink-brown-soft);
+    font-size: 0.88rem;
+  }
+</style>
+</head>
+<body>
+
+  <div class="page">
+    <header>
+      <h1>GoldComp Admin</h1>
+      <p class="subtitle">Remove characters from either leaderboard.</p>
+    </header>
+
+    <div class="password-panel">
+      <input type="password" id="passwordInput" placeholder="Admin password" />
+      <button id="loadButton">Load</button>
+    </div>
+
+    <p class="status-line" id="statusLine"></p>
+
+    <p class="section-heading">Gold Competition</p>
+    <div class="ledger" id="goldList">
+      <div class="empty-note">Enter the admin password and click Load.</div>
+    </div>
+
+    <p class="section-heading">XP Race</p>
+    <div class="ledger" id="xpList">
+      <div class="empty-note">Enter the admin password and click Load.</div>
+    </div>
+  </div>
+
+  <script>
+    function getPassword() {
+      return document.getElementById('passwordInput').value;
+    }
+
+    function setStatus(message, isError) {
+      const el = document.getElementById('statusLine');
+      el.textContent = message;
+      el.className = 'status-line ' + (isError ? 'err' : 'ok');
+    }
+
+    function escapeHtml(str) {
+      const div = document.createElement('div');
+      div.textContent = str;
+      return div.innerHTML;
+    }
+
+    async function loadCharacters() {
+      setStatus('Loading...', false);
+      try {
+        const response = await fetch('/api/admin/characters');
+        if (!response.ok) throw new Error('Failed to load character list');
+        const data = await response.json();
+
+        renderList('goldList', data.gold, (c) =>
+          `<span class="char-info">${escapeHtml(c.characterName)}<span class="realm-name">${escapeHtml(c.realmName)}</span><span class="char-value">${c.gold.toLocaleString('en-US')}c</span></span>`,
+          (c) => deleteCharacter('gold', c.characterName, c.realmName)
+        );
+
+        renderList('xpList', data.xp, (c) =>
+          `<span class="char-info">${escapeHtml(c.characterName)}<span class="realm-name">${escapeHtml(c.realmName)}</span><span class="char-value">Lv ${c.characterLevel}</span></span>`,
+          (c) => deleteCharacter('xp', c.characterName, c.realmName)
+        );
+
+        setStatus('Loaded ' + (data.gold.length + data.xp.length) + ' total entries.', false);
+      } catch (err) {
+        setStatus('Error loading character lists: ' + err.message, true);
+      }
+    }
+
+    function renderList(containerId, characters, infoHtml, onDelete) {
+      const container = document.getElementById(containerId);
+
+      if (!characters || characters.length === 0) {
+        container.innerHTML = '<div class="empty-note">No entries.</div>';
+        return;
+      }
+
+      container.innerHTML = '';
+      characters.forEach((c) => {
+        const row = document.createElement('div');
+        row.className = 'char-row';
+        row.innerHTML = infoHtml(c);
+
+        const btn = document.createElement('button');
+        btn.className = 'delete-btn';
+        btn.textContent = 'Delete';
+        btn.addEventListener('click', () => {
+          const confirmed = confirm(
+            `Remove ${c.characterName}-${c.realmName} from this leaderboard? This cannot be undone.`
+          );
+          if (confirmed) onDelete(c);
+        });
+
+        row.appendChild(btn);
+        container.appendChild(row);
+      });
+    }
+
+    async function deleteCharacter(type, characterName, realmName) {
+      const endpoint = type === 'gold' ? '/api/admin/delete-gold-character' : '/api/admin/delete-xp-character';
+
+      try {
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ characterName, realmName, adminPassword: getPassword() }),
+        });
+
+        const data = await response.json().catch(() => ({}));
+
+        if (!response.ok) {
+          setStatus('Delete failed: ' + (data.error || response.statusText), true);
+          return;
+        }
+
+        setStatus(`Removed ${characterName}-${realmName}.`, false);
+        loadCharacters();
+      } catch (err) {
+        setStatus('Delete failed: ' + err.message, true);
+      }
+    }
+
+    document.getElementById('loadButton').addEventListener('click', loadCharacters);
+    document.getElementById('passwordInput').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') loadCharacters();
+    });
+  </script>
+
+</body>
+</html>

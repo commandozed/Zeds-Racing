@@ -10,11 +10,18 @@ const path = require("path");
 
 const PORT = process.env.PORT || 5000;
 const DATABASE_URL = process.env.DATABASE_URL;
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
 
 if (!DATABASE_URL) {
   console.error("Missing DATABASE_URL environment variable.");
   console.error("Set it to your Supabase Session pooler connection string.");
   process.exit(1);
+}
+
+if (!ADMIN_PASSWORD) {
+  console.warn(
+    "Warning: ADMIN_PASSWORD is not set. The admin page's delete function will refuse all requests until it is."
+  );
 }
 
 const app = express();
@@ -403,6 +410,137 @@ app.get("/api/leaderboard/xp", async (req, res) => {
   } catch (err) {
     console.error("Database error:", err.message);
     res.status(500).json({ error: "Failed to load XP leaderboard" });
+  }
+});
+
+// ---- Admin: list and delete characters -----------------------------------
+//
+// The list endpoints are read-only and mirror what's already public on the
+// leaderboard pages, so they're left open. Deletion is destructive and
+// public-facing (anyone with the site's link could otherwise grief the
+// leaderboard), so it requires ADMIN_PASSWORD, set as an environment
+// variable and never stored in the database or sent anywhere except this
+// one check.
+
+function checkAdminPassword(req, res) {
+  const { adminPassword } = req.body || {};
+
+  if (!ADMIN_PASSWORD) {
+    res.status(500).json({ error: "Server has no ADMIN_PASSWORD configured." });
+    return false;
+  }
+  if (adminPassword !== ADMIN_PASSWORD) {
+    res.status(401).json({ error: "Incorrect admin password." });
+    return false;
+  }
+  return true;
+}
+
+app.get("/api/admin/characters", async (req, res) => {
+  try {
+    const [goldResult, xpResult] = await Promise.all([
+      pool.query(`SELECT character_name, realm_name, gold FROM characters ORDER BY character_name`),
+      pool.query(
+        `SELECT character_name, realm_name, character_level FROM xp_characters ORDER BY character_name`
+      ),
+    ]);
+
+    res.json({
+      ok: true,
+      gold: goldResult.rows.map((r) => ({
+        characterName: r.character_name,
+        realmName: r.realm_name,
+        gold: Number(r.gold),
+      })),
+      xp: xpResult.rows.map((r) => ({
+        characterName: r.character_name,
+        realmName: r.realm_name,
+        characterLevel: r.character_level,
+      })),
+    });
+  } catch (err) {
+    console.error("Database error:", err.message);
+    res.status(500).json({ error: "Failed to load character lists" });
+  }
+});
+
+app.post("/api/admin/delete-gold-character", async (req, res) => {
+  if (!checkAdminPassword(req, res)) return;
+
+  const { characterName, realmName } = req.body || {};
+  if (typeof characterName !== "string" || typeof realmName !== "string") {
+    return res.status(400).json({ error: "characterName and realmName are required" });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      `DELETE FROM characters WHERE character_name = $1 AND realm_name = $2`,
+      [characterName.trim(), realmName.trim()]
+    );
+    await client.query(
+      `DELETE FROM submissions WHERE character_name = $1 AND realm_name = $2`,
+      [characterName.trim(), realmName.trim()]
+    );
+    await client.query("COMMIT");
+
+    console.log(`Admin deleted gold entry: ${characterName}-${realmName}`);
+    res.json({ ok: true });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("Database error:", err.message);
+    res.status(500).json({ error: "Failed to delete character" });
+  } finally {
+    client.release();
+  }
+});
+
+app.post("/api/admin/delete-xp-character", async (req, res) => {
+  if (!checkAdminPassword(req, res)) return;
+
+  const { characterName, realmName } = req.body || {};
+  if (typeof characterName !== "string" || typeof realmName !== "string") {
+    return res.status(400).json({ error: "characterName and realmName are required" });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      `DELETE FROM xp_characters WHERE character_name = $1 AND realm_name = $2`,
+      [characterName.trim(), realmName.trim()]
+    );
+    await client.query(
+      `DELETE FROM xp_submissions WHERE character_name = $1 AND realm_name = $2`,
+      [characterName.trim(), realmName.trim()]
+    );
+
+    // Recompute ranks for whoever's left, resetting previous_rank to match
+    // so nobody shows a phantom "moved up" badge just because someone else
+    // was removed by an admin.
+    await client.query(`
+      WITH ranked AS (
+        SELECT id, ROW_NUMBER() OVER (ORDER BY character_level DESC, current_xp DESC) AS new_rank
+        FROM xp_characters
+      )
+      UPDATE xp_characters x
+      SET rank = ranked.new_rank,
+          previous_rank = ranked.new_rank
+      FROM ranked
+      WHERE ranked.id = x.id
+    `);
+
+    await client.query("COMMIT");
+
+    console.log(`Admin deleted XP entry: ${characterName}-${realmName}`);
+    res.json({ ok: true });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("Database error:", err.message);
+    res.status(500).json({ error: "Failed to delete character" });
+  } finally {
+    client.release();
   }
 });
 
