@@ -103,6 +103,16 @@ async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_xp_submissions_character
     ON xp_submissions (character_name, realm_name, submitted_at DESC)
   `);
+
+  // Stores an optional end time for each race type. Null/missing means no
+  // timer is running -- the countdown UI just hides itself in that case.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS race_settings (
+      race_type TEXT PRIMARY KEY,
+      ends_at TIMESTAMPTZ,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `);
 }
 
 // ---- Routes ---------------------------------------------------------------
@@ -541,6 +551,86 @@ app.post("/api/admin/delete-xp-character", async (req, res) => {
     res.status(500).json({ error: "Failed to delete character" });
   } finally {
     client.release();
+  }
+});
+
+// ---- Race timers ----------------------------------------------------------
+
+// Public: returns each race's end time (or null if no timer is set), so
+// the leaderboard pages can render a live countdown.
+app.get("/api/race-settings", async (req, res) => {
+  try {
+    const result = await pool.query(`SELECT race_type, ends_at FROM race_settings`);
+
+    const settings = { gold: { endsAt: null }, xp: { endsAt: null } };
+    result.rows.forEach((row) => {
+      if (settings[row.race_type]) {
+        settings[row.race_type].endsAt = row.ends_at;
+      }
+    });
+
+    res.json({ ok: true, ...settings });
+  } catch (err) {
+    console.error("Database error:", err.message);
+    res.status(500).json({ error: "Failed to load race settings" });
+  }
+});
+
+// Admin: starts (or restarts) a race's countdown, ending durationMinutes
+// from right now.
+app.post("/api/admin/set-race-timer", async (req, res) => {
+  if (!checkAdminPassword(req, res)) return;
+
+  const { raceType, durationMinutes } = req.body || {};
+
+  if (raceType !== "gold" && raceType !== "xp") {
+    return res.status(400).json({ error: 'raceType must be "gold" or "xp"' });
+  }
+  if (typeof durationMinutes !== "number" || !Number.isFinite(durationMinutes) || durationMinutes <= 0) {
+    return res.status(400).json({ error: "durationMinutes must be a positive number" });
+  }
+
+  try {
+    const result = await pool.query(
+      `INSERT INTO race_settings (race_type, ends_at, updated_at)
+       VALUES ($1, now() + ($2 * interval '1 minute'), now())
+       ON CONFLICT (race_type)
+       DO UPDATE SET ends_at = EXCLUDED.ends_at, updated_at = EXCLUDED.updated_at
+       RETURNING ends_at`,
+      [raceType, durationMinutes]
+    );
+
+    console.log(`Admin set ${raceType} race timer: ends at ${result.rows[0].ends_at}`);
+    res.json({ ok: true, endsAt: result.rows[0].ends_at });
+  } catch (err) {
+    console.error("Database error:", err.message);
+    res.status(500).json({ error: "Failed to set race timer" });
+  }
+});
+
+// Admin: clears a race's timer, hiding the countdown on that page.
+app.post("/api/admin/clear-race-timer", async (req, res) => {
+  if (!checkAdminPassword(req, res)) return;
+
+  const { raceType } = req.body || {};
+  if (raceType !== "gold" && raceType !== "xp") {
+    return res.status(400).json({ error: 'raceType must be "gold" or "xp"' });
+  }
+
+  try {
+    await pool.query(
+      `INSERT INTO race_settings (race_type, ends_at, updated_at)
+       VALUES ($1, NULL, now())
+       ON CONFLICT (race_type)
+       DO UPDATE SET ends_at = NULL, updated_at = now()`,
+      [raceType]
+    );
+
+    console.log(`Admin cleared ${raceType} race timer`);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("Database error:", err.message);
+    res.status(500).json({ error: "Failed to clear race timer" });
   }
 });
 

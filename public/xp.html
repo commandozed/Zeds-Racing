@@ -90,6 +90,35 @@
     border-color: var(--tarnished-gold);
   }
 
+  .countdown-banner {
+    text-align: center;
+    margin-bottom: 1.5rem;
+    padding: 0.7rem 1rem;
+    border-radius: 6px;
+    background: rgba(238, 227, 200, 0.06);
+    border: 1px solid rgba(238, 227, 200, 0.14);
+  }
+
+  .countdown-banner[hidden] { display: none; }
+
+  .countdown-label {
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #9aa3af;
+    margin-bottom: 0.2rem;
+  }
+
+  .countdown-time {
+    font-family: 'Cinzel', serif;
+    font-weight: 700;
+    font-size: 1.4rem;
+    font-variant-numeric: tabular-nums;
+    color: var(--tarnished-gold);
+  }
+
+  .countdown-time.ended { color: var(--wax-red); }
+
   .section-heading {
     font-family: 'Cinzel', serif;
     font-size: 0.85rem;
@@ -255,6 +284,11 @@
       <a href="/xp.html" class="active">Experience</a>
     </nav>
 
+    <div class="countdown-banner" id="countdownBanner" hidden>
+      <div class="countdown-label">Race Ends In</div>
+      <div class="countdown-time" id="countdownTime"></div>
+    </div>
+
     <p class="section-heading">Race Standings</p>
     <div class="ledger">
       <table id="table" hidden>
@@ -379,8 +413,52 @@
       }
     }
 
+    // ---- Race countdown ----
+
+    let raceEndsAt = null;
+
+    function formatCountdown(ms) {
+      if (ms <= 0) return 'Race ended';
+      const totalSeconds = Math.floor(ms / 1000);
+      const h = Math.floor(totalSeconds / 3600);
+      const m = Math.floor((totalSeconds % 3600) / 60);
+      const s = totalSeconds % 60;
+      const pad = (n) => String(n).padStart(2, '0');
+      return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
+    }
+
+    function tickCountdown() {
+      const banner = document.getElementById('countdownBanner');
+      const timeEl = document.getElementById('countdownTime');
+
+      if (!raceEndsAt) {
+        banner.hidden = true;
+        return;
+      }
+
+      banner.hidden = false;
+      const remaining = new Date(raceEndsAt).getTime() - Date.now();
+      timeEl.textContent = formatCountdown(remaining);
+      timeEl.className = 'countdown-time' + (remaining <= 0 ? ' ended' : '');
+    }
+
+    async function loadRaceSettings() {
+      try {
+        const response = await fetch('/api/race-settings');
+        if (!response.ok) throw new Error('Request failed');
+        const data = await response.json();
+        raceEndsAt = data.xp ? data.xp.endsAt : null;
+        tickCountdown();
+      } catch (err) {
+        // Leave whatever was last known rather than hiding on a blip.
+      }
+    }
+
     loadLeaderboard();
+    loadRaceSettings();
     setInterval(loadLeaderboard, 15000);
+    setInterval(loadRaceSettings, 15000);
+    setInterval(tickCountdown, 1000);
   </script>
 
 </body>
