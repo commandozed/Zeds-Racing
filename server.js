@@ -117,8 +117,32 @@ async function initDb() {
 
 // ---- Routes ---------------------------------------------------------------
 
+const SUBMISSION_GRACE_SECONDS = 60;
+
+/**
+ * Checks whether submissions are still allowed for a race type. Allowed
+ * when no timer has ever been set, and for a grace period after the
+ * timer's end time -- everything closes after that until an admin resets
+ * the race. The comparison runs inside Postgres so it's judged against
+ * the database's clock, not this server's, avoiding any clock-skew games.
+ */
+async function isSubmissionWindowOpen(raceType) {
+  const result = await pool.query(
+    `SELECT (ends_at IS NULL OR now() <= ends_at + ($2 * interval '1 second')) AS allowed
+     FROM race_settings WHERE race_type = $1`,
+    [raceType, SUBMISSION_GRACE_SECONDS]
+  );
+
+  if (result.rows.length === 0) return true; // no timer ever set for this race
+  return result.rows[0].allowed;
+}
+
 app.post("/api/submit-gold", async (req, res) => {
   const { characterName, realmName, gold, lastUpdated } = req.body || {};
+
+  if (!(await isSubmissionWindowOpen("gold"))) {
+    return res.status(403).json({ error: "The gold competition has ended. Submissions are closed." });
+  }
 
   // Basic validation -- reject anything that doesn't look like a real snapshot.
   if (typeof characterName !== "string" || characterName.trim() === "") {
@@ -187,6 +211,10 @@ app.post("/api/submit-gold", async (req, res) => {
 app.post("/api/submit-xp", async (req, res) => {
   const { characterName, realmName, characterLevel, currentXP, currentXPMax, lastUpdated } =
     req.body || {};
+
+  if (!(await isSubmissionWindowOpen("xp"))) {
+    return res.status(403).json({ error: "The XP race has ended. Submissions are closed." });
+  }
 
   if (typeof characterName !== "string" || characterName.trim() === "") {
     return res.status(400).json({ error: "characterName is required" });
@@ -631,6 +659,62 @@ app.post("/api/admin/clear-race-timer", async (req, res) => {
   } catch (err) {
     console.error("Database error:", err.message);
     res.status(500).json({ error: "Failed to clear race timer" });
+  }
+});
+
+// Admin: fully resets the gold competition -- wipes all standings and
+// history, and clears the timer, ready for a fresh race.
+app.post("/api/admin/reset-gold-race", async (req, res) => {
+  if (!checkAdminPassword(req, res)) return;
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(`DELETE FROM characters`);
+    await client.query(`DELETE FROM submissions`);
+    await client.query(
+      `INSERT INTO race_settings (race_type, ends_at, updated_at)
+       VALUES ('gold', NULL, now())
+       ON CONFLICT (race_type) DO UPDATE SET ends_at = NULL, updated_at = now()`
+    );
+    await client.query("COMMIT");
+
+    console.log("Admin reset the gold competition.");
+    res.json({ ok: true });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("Database error:", err.message);
+    res.status(500).json({ error: "Failed to reset gold competition" });
+  } finally {
+    client.release();
+  }
+});
+
+// Admin: fully resets the XP race -- wipes all standings and history, and
+// clears the timer, ready for a fresh race.
+app.post("/api/admin/reset-xp-race", async (req, res) => {
+  if (!checkAdminPassword(req, res)) return;
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(`DELETE FROM xp_characters`);
+    await client.query(`DELETE FROM xp_submissions`);
+    await client.query(
+      `INSERT INTO race_settings (race_type, ends_at, updated_at)
+       VALUES ('xp', NULL, now())
+       ON CONFLICT (race_type) DO UPDATE SET ends_at = NULL, updated_at = now()`
+    );
+    await client.query("COMMIT");
+
+    console.log("Admin reset the XP race.");
+    res.json({ ok: true });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("Database error:", err.message);
+    res.status(500).json({ error: "Failed to reset XP race" });
+  } finally {
+    client.release();
   }
 });
 

@@ -205,6 +205,7 @@
 
   .timer-set-btn { background: var(--ink-brown); color: var(--parchment); }
   .timer-clear-btn { background: transparent; color: var(--wax-red); border: 1px solid var(--wax-red) !important; }
+  .new-race-btn { background: var(--wax-red); color: #fff; }
 </style>
 </head>
 <body>
@@ -230,6 +231,7 @@
           <input type="number" id="goldDurationInput" placeholder="mins" min="1" />
           <button class="timer-set-btn" id="goldSetTimerBtn">Set</button>
           <button class="timer-clear-btn" id="goldClearTimerBtn">Clear</button>
+          <button class="new-race-btn" id="goldNewRaceBtn">New Race</button>
         </div>
         <span class="timer-status" id="goldTimerStatus">Load to see current status.</span>
       </div>
@@ -239,6 +241,7 @@
           <input type="number" id="xpDurationInput" placeholder="mins" min="1" />
           <button class="timer-set-btn" id="xpSetTimerBtn">Set</button>
           <button class="timer-clear-btn" id="xpClearTimerBtn">Clear</button>
+          <button class="new-race-btn" id="xpNewRaceBtn">New Race</button>
         </div>
         <span class="timer-status" id="xpTimerStatus">Load to see current status.</span>
       </div>
@@ -427,10 +430,43 @@
       }
     }
 
+    async function resetRace(raceType) {
+      const label = raceType === 'gold' ? 'Gold Competition' : 'XP Race';
+      const confirmed = confirm(
+        `This will PERMANENTLY delete every entry and all history for the ${label}, and clear its timer.\n\n` +
+        `This cannot be undone. Type OK only if you're ready to start a brand new race.`
+      );
+      if (!confirmed) return;
+
+      const endpoint = raceType === 'gold' ? '/api/admin/reset-gold-race' : '/api/admin/reset-xp-race';
+
+      try {
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ adminPassword: getPassword() }),
+        });
+        const data = await response.json().catch(() => ({}));
+
+        if (!response.ok) {
+          setStatus(`Failed to reset ${label}: ` + (data.error || response.statusText), true);
+          return;
+        }
+
+        setStatus(`${label} has been reset. Leaderboard is now empty.`, false);
+        loadRaceTimers();
+        loadCharacters();
+      } catch (err) {
+        setStatus(`Failed to reset ${label}: ` + err.message, true);
+      }
+    }
+
     document.getElementById('goldSetTimerBtn').addEventListener('click', () => setRaceTimer('gold'));
     document.getElementById('goldClearTimerBtn').addEventListener('click', () => clearRaceTimer('gold'));
+    document.getElementById('goldNewRaceBtn').addEventListener('click', () => resetRace('gold'));
     document.getElementById('xpSetTimerBtn').addEventListener('click', () => setRaceTimer('xp'));
     document.getElementById('xpClearTimerBtn').addEventListener('click', () => clearRaceTimer('xp'));
+    document.getElementById('xpNewRaceBtn').addEventListener('click', () => resetRace('xp'));
 
     document.getElementById('loadButton').addEventListener('click', () => {
       loadCharacters();

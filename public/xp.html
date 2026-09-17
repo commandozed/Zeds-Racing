@@ -285,7 +285,7 @@
     </nav>
 
     <div class="countdown-banner" id="countdownBanner" hidden>
-      <div class="countdown-label">Race Ends In</div>
+      <div class="countdown-label" id="countdownLabel">Race Ends In</div>
       <div class="countdown-time" id="countdownTime"></div>
     </div>
 
@@ -415,10 +415,10 @@
 
     // ---- Race countdown ----
 
+    const GRACE_PERIOD_MS = 60 * 1000; // must match server's SUBMISSION_GRACE_SECONDS
     let raceEndsAt = null;
 
     function formatCountdown(ms) {
-      if (ms <= 0) return 'Race ended';
       const totalSeconds = Math.floor(ms / 1000);
       const h = Math.floor(totalSeconds / 3600);
       const m = Math.floor((totalSeconds % 3600) / 60);
@@ -429,6 +429,7 @@
 
     function tickCountdown() {
       const banner = document.getElementById('countdownBanner');
+      const labelEl = document.getElementById('countdownLabel');
       const timeEl = document.getElementById('countdownTime');
 
       if (!raceEndsAt) {
@@ -437,9 +438,23 @@
       }
 
       banner.hidden = false;
-      const remaining = new Date(raceEndsAt).getTime() - Date.now();
-      timeEl.textContent = formatCountdown(remaining);
-      timeEl.className = 'countdown-time' + (remaining <= 0 ? ' ended' : '');
+      const endsAtMs = new Date(raceEndsAt).getTime();
+      const remaining = endsAtMs - Date.now();
+      const graceRemaining = endsAtMs + GRACE_PERIOD_MS - Date.now();
+
+      if (remaining > 0) {
+        labelEl.textContent = 'Race Ends In';
+        timeEl.textContent = formatCountdown(remaining);
+        timeEl.className = 'countdown-time';
+      } else if (graceRemaining > 0) {
+        labelEl.textContent = 'Final Submissions Closing In';
+        timeEl.textContent = formatCountdown(graceRemaining);
+        timeEl.className = 'countdown-time ended';
+      } else {
+        labelEl.textContent = '';
+        timeEl.textContent = 'Race Ended — Final Standings';
+        timeEl.className = 'countdown-time ended';
+      }
     }
 
     async function loadRaceSettings() {
