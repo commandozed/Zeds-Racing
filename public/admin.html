@@ -245,6 +245,26 @@
         </div>
         <span class="timer-status" id="xpTimerStatus">Load to see current status.</span>
       </div>
+      <div class="timer-row">
+        <span class="timer-label">Forever Gold Competition</span>
+        <div class="timer-controls">
+          <input type="number" id="forever_goldDurationInput" placeholder="mins" min="1" />
+          <button class="timer-set-btn" id="forever_goldSetTimerBtn">Set</button>
+          <button class="timer-clear-btn" id="forever_goldClearTimerBtn">Clear</button>
+          <button class="new-race-btn" id="forever_goldNewRaceBtn">New Race</button>
+        </div>
+        <span class="timer-status" id="forever_goldTimerStatus">Load to see current status.</span>
+      </div>
+      <div class="timer-row">
+        <span class="timer-label">Forever XP Race</span>
+        <div class="timer-controls">
+          <input type="number" id="forever_xpDurationInput" placeholder="mins" min="1" />
+          <button class="timer-set-btn" id="forever_xpSetTimerBtn">Set</button>
+          <button class="timer-clear-btn" id="forever_xpClearTimerBtn">Clear</button>
+          <button class="new-race-btn" id="forever_xpNewRaceBtn">New Race</button>
+        </div>
+        <span class="timer-status" id="forever_xpTimerStatus">Load to see current status.</span>
+      </div>
     </div>
 
     <p class="section-heading">Class &amp; Race Randomizer</p>
@@ -256,6 +276,13 @@
         </div>
         <span class="timer-status" id="randomizerStatus">Triggers the wheel spin on the XP race page. Result is hidden until it lands, even here.</span>
       </div>
+      <div class="timer-row">
+        <span class="timer-label">Forever XP Race Randomizer</span>
+        <div class="timer-controls">
+          <button class="timer-set-btn" id="spinRandomizerForeverBtn">Spin</button>
+        </div>
+        <span class="timer-status" id="randomizerForeverStatus">Independent from the retail randomizer above -- triggers the wheel spin on the Forever XP page only.</span>
+      </div>
     </div>
 
     <p class="section-heading">Gold Competition</p>
@@ -265,6 +292,16 @@
 
     <p class="section-heading">XP Race</p>
     <div class="ledger" id="xpList">
+      <div class="empty-note">Enter the admin password and click Load.</div>
+    </div>
+
+    <p class="section-heading">Forever Gold Competition</p>
+    <div class="ledger" id="forever_goldList">
+      <div class="empty-note">Enter the admin password and click Load.</div>
+    </div>
+
+    <p class="section-heading">Forever XP Race</p>
+    <div class="ledger" id="forever_xpList">
       <div class="empty-note">Enter the admin password and click Load.</div>
     </div>
   </div>
@@ -303,7 +340,18 @@
           (c) => deleteCharacter('xp', c.characterName, c.realmName)
         );
 
-        setStatus('Loaded ' + (data.gold.length + data.xp.length) + ' total entries.', false);
+        renderList('forever_goldList', data.foreverGold, (c) =>
+          `<span class="char-info">${escapeHtml(c.characterName)}<span class="realm-name">${escapeHtml(c.realmName)}</span><span class="char-value">${c.gold.toLocaleString('en-US')}c</span></span>`,
+          (c) => deleteCharacter('forever_gold', c.characterName, c.realmName)
+        );
+
+        renderList('forever_xpList', data.foreverXp, (c) =>
+          `<span class="char-info">${escapeHtml(c.characterName)}<span class="realm-name">${escapeHtml(c.realmName)}</span><span class="char-value">Lv ${c.characterLevel}</span></span>`,
+          (c) => deleteCharacter('forever_xp', c.characterName, c.realmName)
+        );
+
+        const total = data.gold.length + data.xp.length + data.foreverGold.length + data.foreverXp.length;
+        setStatus('Loaded ' + total + ' total entries.', false);
       } catch (err) {
         setStatus('Error loading character lists: ' + err.message, true);
       }
@@ -339,7 +387,13 @@
     }
 
     async function deleteCharacter(type, characterName, realmName) {
-      const endpoint = type === 'gold' ? '/api/admin/delete-gold-character' : '/api/admin/delete-xp-character';
+      const endpoints = {
+        gold: '/api/admin/delete-gold-character',
+        xp: '/api/admin/delete-xp-character',
+        forever_gold: '/api/admin/delete-gold-forever-character',
+        forever_xp: '/api/admin/delete-xp-forever-character',
+      };
+      const endpoint = endpoints[type];
 
       try {
         const response = await fetch(endpoint, {
@@ -385,9 +439,12 @@
 
         document.getElementById('goldTimerStatus').textContent = formatTimerStatus(data.gold && data.gold.endsAt);
         document.getElementById('xpTimerStatus').textContent = formatTimerStatus(data.xp && data.xp.endsAt);
+        document.getElementById('forever_goldTimerStatus').textContent = formatTimerStatus(data.forever_gold && data.forever_gold.endsAt);
+        document.getElementById('forever_xpTimerStatus').textContent = formatTimerStatus(data.forever_xp && data.forever_xp.endsAt);
       } catch (err) {
-        document.getElementById('goldTimerStatus').textContent = 'Error loading status.';
-        document.getElementById('xpTimerStatus').textContent = 'Error loading status.';
+        ['gold', 'xp', 'forever_gold', 'forever_xp'].forEach((t) => {
+          document.getElementById(t + 'TimerStatus').textContent = 'Error loading status.';
+        });
       }
     }
 
@@ -413,7 +470,7 @@
           return;
         }
 
-        setStatus(`${raceType === 'gold' ? 'Gold' : 'XP'} timer set for ${durationMinutes} minutes.`, false);
+        setStatus(`${({ gold: 'Gold', xp: 'XP', forever_gold: 'Forever Gold', forever_xp: 'Forever XP' }[raceType])} timer set for ${durationMinutes} minutes.`, false);
         loadRaceTimers();
       } catch (err) {
         setStatus('Failed to set timer: ' + err.message, true);
@@ -434,7 +491,7 @@
           return;
         }
 
-        setStatus(`${raceType === 'gold' ? 'Gold' : 'XP'} timer cleared.`, false);
+        setStatus(`${({ gold: 'Gold', xp: 'XP', forever_gold: 'Forever Gold', forever_xp: 'Forever XP' }[raceType])} timer cleared.`, false);
         loadRaceTimers();
       } catch (err) {
         setStatus('Failed to clear timer: ' + err.message, true);
@@ -442,14 +499,26 @@
     }
 
     async function resetRace(raceType) {
-      const label = raceType === 'gold' ? 'Gold Competition' : 'XP Race';
+      const labels = {
+        gold: 'Gold Competition',
+        xp: 'XP Race',
+        forever_gold: 'Forever Gold Competition',
+        forever_xp: 'Forever XP Race',
+      };
+      const endpoints = {
+        gold: '/api/admin/reset-gold-race',
+        xp: '/api/admin/reset-xp-race',
+        forever_gold: '/api/admin/reset-gold-forever-race',
+        forever_xp: '/api/admin/reset-xp-forever-race',
+      };
+      const label = labels[raceType];
+      const endpoint = endpoints[raceType];
+
       const confirmed = confirm(
         `This will PERMANENTLY delete every entry and all history for the ${label}, and clear its timer.\n\n` +
         `This cannot be undone. Type OK only if you're ready to start a brand new race.`
       );
       if (!confirmed) return;
-
-      const endpoint = raceType === 'gold' ? '/api/admin/reset-gold-race' : '/api/admin/reset-xp-race';
 
       try {
         const response = await fetch(endpoint, {
@@ -497,7 +566,33 @@
       }
     }
 
+    async function spinRandomizerForever() {
+      const confirmed = confirm(
+        'Spin the WoW Forever class/race randomizer? This will roll a new result and start the reveal animation on the Forever XP page.'
+      );
+      if (!confirmed) return;
+
+      try {
+        const response = await fetch('/api/admin/spin-randomizer-forever', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ adminPassword: getPassword() }),
+        });
+        const data = await response.json().catch(() => ({}));
+
+        if (!response.ok) {
+          setStatus('Failed to spin randomizer: ' + (data.error || response.statusText), true);
+          return;
+        }
+
+        setStatus('Forever randomizer started -- check the Forever XP page for the reveal.', false);
+      } catch (err) {
+        setStatus('Failed to spin randomizer: ' + err.message, true);
+      }
+    }
+
     document.getElementById('spinRandomizerBtn').addEventListener('click', spinRandomizer);
+    document.getElementById('spinRandomizerForeverBtn').addEventListener('click', spinRandomizerForever);
 
     document.getElementById('goldSetTimerBtn').addEventListener('click', () => setRaceTimer('gold'));
     document.getElementById('goldClearTimerBtn').addEventListener('click', () => clearRaceTimer('gold'));
@@ -505,6 +600,12 @@
     document.getElementById('xpSetTimerBtn').addEventListener('click', () => setRaceTimer('xp'));
     document.getElementById('xpClearTimerBtn').addEventListener('click', () => clearRaceTimer('xp'));
     document.getElementById('xpNewRaceBtn').addEventListener('click', () => resetRace('xp'));
+    document.getElementById('forever_goldSetTimerBtn').addEventListener('click', () => setRaceTimer('forever_gold'));
+    document.getElementById('forever_goldClearTimerBtn').addEventListener('click', () => clearRaceTimer('forever_gold'));
+    document.getElementById('forever_goldNewRaceBtn').addEventListener('click', () => resetRace('forever_gold'));
+    document.getElementById('forever_xpSetTimerBtn').addEventListener('click', () => setRaceTimer('forever_xp'));
+    document.getElementById('forever_xpClearTimerBtn').addEventListener('click', () => clearRaceTimer('forever_xp'));
+    document.getElementById('forever_xpNewRaceBtn').addEventListener('click', () => resetRace('forever_xp'));
 
     document.getElementById('loadButton').addEventListener('click', () => {
       loadCharacters();

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Zeds Racing — XP</title>
+<title>Zeds Racing — Forever XP</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
@@ -130,6 +130,7 @@
     opacity: 0.85;
     margin: 0 0 0.6rem 0.2rem;
   }
+
 
   /* ---- Class/race randomizer ---- */
 
@@ -425,15 +426,15 @@
 
   <div class="page">
     <header>
-      <h1>Zeds Racing — XP Race</h1>
+      <h1>Zeds Racing — Forever XP Race</h1>
       <p class="subtitle" id="subtitle">Loading standings&hellip;</p>
     </header>
 
     <nav class="nav-tabs">
       <a href="/">Gold</a>
-      <a href="/xp.html" class="active">Experience</a>
+      <a href="/xp.html">Experience</a>
       <a href="/forever.html">Forever Gold</a>
-      <a href="/forever-xp.html">Forever XP</a>
+      <a href="/forever-xp.html" class="active">Forever XP</a>
     </nav>
 
     <div class="countdown-banner" id="countdownBanner" hidden>
@@ -529,7 +530,7 @@
       const footer = document.getElementById('footer');
 
       try {
-        const response = await fetch('/api/leaderboard/xp');
+        const response = await fetch('/api/leaderboard/xp-forever');
         if (!response.ok) throw new Error('Request failed');
         const data = await response.json();
         const rows = data.leaderboard || [];
@@ -645,7 +646,7 @@
         const response = await fetch('/api/race-settings');
         if (!response.ok) throw new Error('Request failed');
         const data = await response.json();
-        raceEndsAt = data.xp ? data.xp.endsAt : null;
+        raceEndsAt = data.forever_xp ? data.forever_xp.endsAt : null;
         tickCountdown();
       } catch (err) {
         // Leave whatever was last known rather than hiding on a blip.
@@ -662,7 +663,8 @@
     // Must stay in sync with RANDOMIZER_RACES / RANDOMIZER_CLASSES in
     // server.js -- used here only to build each wheel's scrolling list.
     // Original Vanilla Classic race/class set (no Death Knight, Monk,
-    // Demon Hunter, or Evoker -- those didn't exist yet).
+    // Demon Hunter, or Evoker -- those didn't exist yet). WoW Forever
+    // launched on this same chassis; edit this list if that changes.
     const RACES = ["Human", "Dwarf", "Night Elf", "Gnome", "Orc", "Tauren", "Troll", "Undead"];
     const CLASSES = ["Warrior", "Paladin", "Hunter", "Rogue", "Priest", "Mage", "Warlock", "Shaman", "Druid"];
 
@@ -754,7 +756,7 @@
 
     async function loadRandomizer() {
       try {
-        const response = await fetch('/api/randomizer');
+        const response = await fetch('/api/randomizer-forever');
         if (!response.ok) throw new Error('Request failed');
         const data = await response.json();
         const panel = document.getElementById('randomizerPanel');

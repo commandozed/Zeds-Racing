@@ -134,6 +134,74 @@ async function initDb() {
   await pool.query(`ALTER TABLE xp_characters ADD COLUMN IF NOT EXISTS character_race TEXT`);
   await pool.query(`ALTER TABLE xp_characters ADD COLUMN IF NOT EXISTS class_name TEXT`);
 
+  // ---- WoW Forever (Classic+ beta) leaderboards ----
+  // Identical shape to the retail tables above -- a fully separate game,
+  // so a fully separate set of standings/history.
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS forever_characters (
+      id SERIAL PRIMARY KEY,
+      character_name TEXT NOT NULL,
+      realm_name TEXT NOT NULL,
+      gold BIGINT NOT NULL,
+      last_updated BIGINT,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE (character_name, realm_name)
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS forever_submissions (
+      id SERIAL PRIMARY KEY,
+      character_name TEXT NOT NULL,
+      realm_name TEXT NOT NULL,
+      gold BIGINT NOT NULL,
+      last_updated BIGINT,
+      submitted_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_forever_submissions_character
+    ON forever_submissions (character_name, realm_name, submitted_at DESC)
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS forever_xp_characters (
+      id SERIAL PRIMARY KEY,
+      character_name TEXT NOT NULL,
+      realm_name TEXT NOT NULL,
+      character_level INTEGER NOT NULL,
+      current_xp BIGINT NOT NULL,
+      current_xp_max BIGINT,
+      last_updated BIGINT,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      rank INTEGER,
+      previous_rank INTEGER,
+      character_race TEXT,
+      class_name TEXT,
+      UNIQUE (character_name, realm_name)
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS forever_xp_submissions (
+      id SERIAL PRIMARY KEY,
+      character_name TEXT NOT NULL,
+      realm_name TEXT NOT NULL,
+      character_level INTEGER NOT NULL,
+      current_xp BIGINT NOT NULL,
+      current_xp_max BIGINT,
+      last_updated BIGINT,
+      submitted_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_forever_xp_submissions_character
+    ON forever_xp_submissions (character_name, realm_name, submitted_at DESC)
+  `);
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS xp_submissions (
       id SERIAL PRIMARY KEY,
@@ -167,6 +235,19 @@ async function initDb() {
   // it was reset), so the page hides the widget entirely.
   await pool.query(`
     CREATE TABLE IF NOT EXISTS xp_randomizer (
+      id INTEGER PRIMARY KEY DEFAULT 1,
+      active BOOLEAN NOT NULL DEFAULT false,
+      race TEXT,
+      class TEXT,
+      spin_started_at TIMESTAMPTZ,
+      CONSTRAINT single_row CHECK (id = 1)
+    )
+  `);
+
+  // Independent copy of the above for the WoW Forever XP race, so a spin
+  // (or a reset) on one game never affects the other's page.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS forever_xp_randomizer (
       id INTEGER PRIMARY KEY DEFAULT 1,
       active BOOLEAN NOT NULL DEFAULT false,
       race TEXT,
@@ -247,6 +328,74 @@ app.post("/api/submit-gold", async (req, res) => {
 
     const saved = upsertResult.rows[0];
     console.log(`Saved ${saved.character_name}-${saved.realm_name}: ${saved.gold} copper`);
+
+    res.status(200).json({
+      ok: true,
+      character: {
+        characterName: saved.character_name,
+        realmName: saved.realm_name,
+        gold: Number(saved.gold),
+        lastUpdated: saved.last_updated !== null ? Number(saved.last_updated) : null,
+        updatedAt: saved.updated_at,
+      },
+    });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("Database error:", err.message);
+    res.status(500).json({ error: "Failed to save gold data" });
+  } finally {
+    client.release();
+  }
+});
+
+// WoW Forever equivalent of /api/submit-gold -- identical logic, separate tables.
+app.post("/api/submit-gold-forever", async (req, res) => {
+  const { characterName, realmName, gold, lastUpdated } = req.body || {};
+
+  if (!(await isSubmissionWindowOpen("forever_gold"))) {
+    return res.status(403).json({ error: "The WoW Forever gold competition has ended. Submissions are closed." });
+  }
+
+  if (typeof characterName !== "string" || characterName.trim() === "") {
+    return res.status(400).json({ error: "characterName is required" });
+  }
+  if (typeof realmName !== "string" || realmName.trim() === "") {
+    return res.status(400).json({ error: "realmName is required" });
+  }
+  if (typeof gold !== "number" || !Number.isFinite(gold) || gold < 0) {
+    return res.status(400).json({ error: "gold must be a non-negative number" });
+  }
+
+  const trimmedCharacter = characterName.trim();
+  const trimmedRealm = realmName.trim();
+  const truncGold = Math.trunc(gold);
+  const truncLastUpdated = Number.isFinite(lastUpdated) ? Math.trunc(lastUpdated) : null;
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const upsertResult = await client.query(
+      `INSERT INTO forever_characters (character_name, realm_name, gold, last_updated, updated_at)
+       VALUES ($1, $2, $3, $4, now())
+       ON CONFLICT (character_name, realm_name)
+       DO UPDATE SET gold = EXCLUDED.gold,
+                     last_updated = EXCLUDED.last_updated,
+                     updated_at = EXCLUDED.updated_at
+       RETURNING character_name, realm_name, gold, last_updated, updated_at`,
+      [trimmedCharacter, trimmedRealm, truncGold, truncLastUpdated]
+    );
+
+    await client.query(
+      `INSERT INTO forever_submissions (character_name, realm_name, gold, last_updated, submitted_at)
+       VALUES ($1, $2, $3, $4, now())`,
+      [trimmedCharacter, trimmedRealm, truncGold, truncLastUpdated]
+    );
+
+    await client.query("COMMIT");
+
+    const saved = upsertResult.rows[0];
+    console.log(`Saved (Forever) ${saved.character_name}-${saved.realm_name}: ${saved.gold} copper`);
 
     res.status(200).json({
       ok: true,
@@ -393,6 +542,126 @@ app.post("/api/submit-xp", async (req, res) => {
   }
 });
 
+// WoW Forever equivalent of /api/submit-xp -- identical logic, separate tables.
+app.post("/api/submit-xp-forever", async (req, res) => {
+  const {
+    characterName,
+    realmName,
+    characterLevel,
+    currentXP,
+    currentXPMax,
+    lastUpdated,
+    characterRace,
+    characterClassName,
+  } = req.body || {};
+
+  if (!(await isSubmissionWindowOpen("forever_xp"))) {
+    return res.status(403).json({ error: "The WoW Forever XP race has ended. Submissions are closed." });
+  }
+
+  if (typeof characterName !== "string" || characterName.trim() === "") {
+    return res.status(400).json({ error: "characterName is required" });
+  }
+  if (typeof realmName !== "string" || realmName.trim() === "") {
+    return res.status(400).json({ error: "realmName is required" });
+  }
+  if (typeof characterLevel !== "number" || !Number.isFinite(characterLevel) || characterLevel < 1) {
+    return res.status(400).json({ error: "characterLevel must be a positive number" });
+  }
+  if (typeof currentXP !== "number" || !Number.isFinite(currentXP) || currentXP < 0) {
+    return res.status(400).json({ error: "currentXP must be a non-negative number" });
+  }
+
+  const trimmedCharacter = characterName.trim();
+  const trimmedRealm = realmName.trim();
+  const truncLevel = Math.trunc(characterLevel);
+  const truncXP = Math.trunc(currentXP);
+  const truncXPMax = Number.isFinite(currentXPMax) ? Math.trunc(currentXPMax) : null;
+  const truncLastUpdated = Number.isFinite(lastUpdated) ? Math.trunc(lastUpdated) : null;
+  const race = typeof characterRace === "string" && characterRace.trim() !== "" ? characterRace.trim() : null;
+  const className =
+    typeof characterClassName === "string" && characterClassName.trim() !== ""
+      ? characterClassName.trim()
+      : null;
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    await client.query(
+      `INSERT INTO forever_xp_characters
+         (character_name, realm_name, character_level, current_xp, current_xp_max, last_updated, updated_at, character_race, class_name)
+       VALUES ($1, $2, $3, $4, $5, $6, now(), $7, $8)
+       ON CONFLICT (character_name, realm_name)
+       DO UPDATE SET character_level = EXCLUDED.character_level,
+                     current_xp = EXCLUDED.current_xp,
+                     current_xp_max = EXCLUDED.current_xp_max,
+                     last_updated = EXCLUDED.last_updated,
+                     updated_at = EXCLUDED.updated_at,
+                     character_race = EXCLUDED.character_race,
+                     class_name = EXCLUDED.class_name`,
+      [trimmedCharacter, trimmedRealm, truncLevel, truncXP, truncXPMax, truncLastUpdated, race, className]
+    );
+
+    await client.query(
+      `INSERT INTO forever_xp_submissions
+         (character_name, realm_name, character_level, current_xp, current_xp_max, last_updated, submitted_at)
+       VALUES ($1, $2, $3, $4, $5, $6, now())`,
+      [trimmedCharacter, trimmedRealm, truncLevel, truncXP, truncXPMax, truncLastUpdated]
+    );
+
+    await client.query(`
+      WITH ranked AS (
+        SELECT id, ROW_NUMBER() OVER (ORDER BY character_level DESC, current_xp DESC) AS new_rank
+        FROM forever_xp_characters
+      )
+      UPDATE forever_xp_characters x
+      SET previous_rank = x.rank,
+          rank = ranked.new_rank
+      FROM ranked
+      WHERE ranked.id = x.id
+    `);
+
+    const saved = await client.query(
+      `SELECT character_name, realm_name, character_level, current_xp, current_xp_max,
+              last_updated, updated_at, rank, previous_rank, character_race, class_name
+       FROM forever_xp_characters
+       WHERE character_name = $1 AND realm_name = $2`,
+      [trimmedCharacter, trimmedRealm]
+    );
+
+    await client.query("COMMIT");
+
+    const row = saved.rows[0];
+    console.log(
+      `Saved (Forever) XP for ${row.character_name}-${row.realm_name}: level ${row.character_level}, rank ${row.rank}`
+    );
+
+    res.status(200).json({
+      ok: true,
+      character: {
+        characterName: row.character_name,
+        realmName: row.realm_name,
+        characterLevel: row.character_level,
+        currentXP: Number(row.current_xp),
+        currentXPMax: row.current_xp_max !== null ? Number(row.current_xp_max) : null,
+        lastUpdated: row.last_updated !== null ? Number(row.last_updated) : null,
+        updatedAt: row.updated_at,
+        rank: row.rank,
+        previousRank: row.previous_rank,
+        characterRace: row.character_race,
+        characterClassName: row.class_name,
+      },
+    });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("Database error:", err.message);
+    res.status(500).json({ error: "Failed to save XP data" });
+  } finally {
+    client.release();
+  }
+});
+
 // Returns every character sorted by gold, highest first -- the leaderboard.
 app.get("/api/leaderboard", async (req, res) => {
   try {
@@ -414,6 +683,30 @@ app.get("/api/leaderboard", async (req, res) => {
   } catch (err) {
     console.error("Database error:", err.message);
     res.status(500).json({ error: "Failed to load leaderboard" });
+  }
+});
+
+// WoW Forever equivalent of /api/leaderboard.
+app.get("/api/leaderboard/gold-forever", async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT character_name, realm_name, gold, last_updated, updated_at
+       FROM forever_characters
+       ORDER BY gold DESC`
+    );
+
+    const leaderboard = result.rows.map((row) => ({
+      characterName: row.character_name,
+      realmName: row.realm_name,
+      gold: Number(row.gold),
+      lastUpdated: row.last_updated !== null ? Number(row.last_updated) : null,
+      updatedAt: row.updated_at,
+    }));
+
+    res.json({ ok: true, leaderboard });
+  } catch (err) {
+    console.error("Database error:", err.message);
+    res.status(500).json({ error: "Failed to load Forever leaderboard" });
   }
 });
 
@@ -499,6 +792,84 @@ app.get("/api/leaderboard/hourly", async (req, res) => {
   }
 });
 
+// WoW Forever equivalent of /api/history.
+app.get("/api/history-forever", async (req, res) => {
+  const { characterName, realmName } = req.query;
+
+  if (typeof characterName !== "string" || typeof realmName !== "string") {
+    return res.status(400).json({ error: "characterName and realmName query params are required" });
+  }
+
+  try {
+    const result = await pool.query(
+      `SELECT gold, last_updated, submitted_at
+       FROM forever_submissions
+       WHERE character_name = $1 AND realm_name = $2
+       ORDER BY submitted_at DESC
+       LIMIT 200`,
+      [characterName.trim(), realmName.trim()]
+    );
+
+    const history = result.rows.map((row) => ({
+      gold: Number(row.gold),
+      lastUpdated: row.last_updated !== null ? Number(row.last_updated) : null,
+      submittedAt: row.submitted_at,
+    }));
+
+    res.json({ ok: true, characterName: characterName.trim(), realmName: realmName.trim(), history });
+  } catch (err) {
+    console.error("Database error:", err.message);
+    res.status(500).json({ error: "Failed to load submission history" });
+  }
+});
+
+// WoW Forever equivalent of /api/leaderboard/hourly.
+app.get("/api/leaderboard/hourly-forever", async (req, res) => {
+  try {
+    const result = await pool.query(`
+      WITH latest AS (
+        SELECT DISTINCT ON (character_name, realm_name)
+          character_name, realm_name, gold AS latest_gold, submitted_at AS latest_at
+        FROM forever_submissions
+        ORDER BY character_name, realm_name, submitted_at DESC
+      ),
+      baseline AS (
+        SELECT DISTINCT ON (character_name, realm_name)
+          character_name, realm_name, gold AS baseline_gold, submitted_at AS baseline_at
+        FROM forever_submissions
+        WHERE submitted_at <= now() - interval '1 hour'
+        ORDER BY character_name, realm_name, submitted_at DESC
+      )
+      SELECT
+        l.character_name,
+        l.realm_name,
+        l.latest_gold,
+        b.baseline_gold,
+        (l.latest_gold - b.baseline_gold) AS gained,
+        b.baseline_at
+      FROM latest l
+      JOIN baseline b
+        ON b.character_name = l.character_name AND b.realm_name = l.realm_name
+      ORDER BY gained DESC
+      LIMIT 10
+    `);
+
+    const hourly = result.rows.map((row) => ({
+      characterName: row.character_name,
+      realmName: row.realm_name,
+      gained: Number(row.gained),
+      currentGold: Number(row.latest_gold),
+      baselineGold: Number(row.baseline_gold),
+      baselineAt: row.baseline_at,
+    }));
+
+    res.json({ ok: true, hourly });
+  } catch (err) {
+    console.error("Database error:", err.message);
+    res.status(500).json({ error: "Failed to load hourly leaderboard" });
+  }
+});
+
 // Returns the XP race standings, ranked by level then current-level XP.
 // Includes each racer's rank change since the prior update, and how long
 // it's been since their last submission (so the page can flag stale
@@ -532,6 +903,36 @@ app.get("/api/leaderboard/xp", async (req, res) => {
   }
 });
 
+// WoW Forever equivalent of /api/leaderboard/xp.
+app.get("/api/leaderboard/xp-forever", async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT character_name, realm_name, character_level, current_xp, current_xp_max,
+              updated_at, rank, previous_rank, character_race, class_name
+       FROM forever_xp_characters
+       ORDER BY rank ASC NULLS LAST`
+    );
+
+    const leaderboard = result.rows.map((row) => ({
+      characterName: row.character_name,
+      realmName: row.realm_name,
+      characterLevel: row.character_level,
+      currentXP: Number(row.current_xp),
+      currentXPMax: row.current_xp_max !== null ? Number(row.current_xp_max) : null,
+      updatedAt: row.updated_at,
+      rank: row.rank,
+      previousRank: row.previous_rank,
+      characterRace: row.character_race,
+      characterClassName: row.class_name,
+    }));
+
+    res.json({ ok: true, leaderboard });
+  } catch (err) {
+    console.error("Database error:", err.message);
+    res.status(500).json({ error: "Failed to load Forever XP leaderboard" });
+  }
+});
+
 // ---- Admin: list and delete characters -----------------------------------
 //
 // The list endpoints are read-only and mirror what's already public on the
@@ -557,10 +958,14 @@ function checkAdminPassword(req, res) {
 
 app.get("/api/admin/characters", async (req, res) => {
   try {
-    const [goldResult, xpResult] = await Promise.all([
+    const [goldResult, xpResult, foreverGoldResult, foreverXpResult] = await Promise.all([
       pool.query(`SELECT character_name, realm_name, gold FROM characters ORDER BY character_name`),
       pool.query(
         `SELECT character_name, realm_name, character_level FROM xp_characters ORDER BY character_name`
+      ),
+      pool.query(`SELECT character_name, realm_name, gold FROM forever_characters ORDER BY character_name`),
+      pool.query(
+        `SELECT character_name, realm_name, character_level FROM forever_xp_characters ORDER BY character_name`
       ),
     ]);
 
@@ -572,6 +977,16 @@ app.get("/api/admin/characters", async (req, res) => {
         gold: Number(r.gold),
       })),
       xp: xpResult.rows.map((r) => ({
+        characterName: r.character_name,
+        realmName: r.realm_name,
+        characterLevel: r.character_level,
+      })),
+      foreverGold: foreverGoldResult.rows.map((r) => ({
+        characterName: r.character_name,
+        realmName: r.realm_name,
+        gold: Number(r.gold),
+      })),
+      foreverXp: foreverXpResult.rows.map((r) => ({
         characterName: r.character_name,
         realmName: r.realm_name,
         characterLevel: r.character_level,
@@ -663,15 +1078,95 @@ app.post("/api/admin/delete-xp-character", async (req, res) => {
   }
 });
 
+app.post("/api/admin/delete-gold-forever-character", async (req, res) => {
+  if (!checkAdminPassword(req, res)) return;
+
+  const { characterName, realmName } = req.body || {};
+  if (typeof characterName !== "string" || typeof realmName !== "string") {
+    return res.status(400).json({ error: "characterName and realmName are required" });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      `DELETE FROM forever_characters WHERE character_name = $1 AND realm_name = $2`,
+      [characterName.trim(), realmName.trim()]
+    );
+    await client.query(
+      `DELETE FROM forever_submissions WHERE character_name = $1 AND realm_name = $2`,
+      [characterName.trim(), realmName.trim()]
+    );
+    await client.query("COMMIT");
+
+    console.log(`Admin deleted Forever gold entry: ${characterName}-${realmName}`);
+    res.json({ ok: true });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("Database error:", err.message);
+    res.status(500).json({ error: "Failed to delete character" });
+  } finally {
+    client.release();
+  }
+});
+
+app.post("/api/admin/delete-xp-forever-character", async (req, res) => {
+  if (!checkAdminPassword(req, res)) return;
+
+  const { characterName, realmName } = req.body || {};
+  if (typeof characterName !== "string" || typeof realmName !== "string") {
+    return res.status(400).json({ error: "characterName and realmName are required" });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      `DELETE FROM forever_xp_characters WHERE character_name = $1 AND realm_name = $2`,
+      [characterName.trim(), realmName.trim()]
+    );
+    await client.query(
+      `DELETE FROM forever_xp_submissions WHERE character_name = $1 AND realm_name = $2`,
+      [characterName.trim(), realmName.trim()]
+    );
+
+    await client.query(`
+      WITH ranked AS (
+        SELECT id, ROW_NUMBER() OVER (ORDER BY character_level DESC, current_xp DESC) AS new_rank
+        FROM forever_xp_characters
+      )
+      UPDATE forever_xp_characters x
+      SET rank = ranked.new_rank,
+          previous_rank = ranked.new_rank
+      FROM ranked
+      WHERE ranked.id = x.id
+    `);
+
+    await client.query("COMMIT");
+
+    console.log(`Admin deleted Forever XP entry: ${characterName}-${realmName}`);
+    res.json({ ok: true });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("Database error:", err.message);
+    res.status(500).json({ error: "Failed to delete character" });
+  } finally {
+    client.release();
+  }
+});
+
 // ---- Race timers ----------------------------------------------------------
 
 // Public: returns each race's end time (or null if no timer is set), so
 // the leaderboard pages can render a live countdown.
+const VALID_RACE_TYPES = ["gold", "xp", "forever_gold", "forever_xp"];
+
 app.get("/api/race-settings", async (req, res) => {
   try {
     const result = await pool.query(`SELECT race_type, ends_at FROM race_settings`);
 
-    const settings = { gold: { endsAt: null }, xp: { endsAt: null } };
+    const settings = {};
+    VALID_RACE_TYPES.forEach((type) => { settings[type] = { endsAt: null }; });
     result.rows.forEach((row) => {
       if (settings[row.race_type]) {
         settings[row.race_type].endsAt = row.ends_at;
@@ -692,8 +1187,8 @@ app.post("/api/admin/set-race-timer", async (req, res) => {
 
   const { raceType, durationMinutes } = req.body || {};
 
-  if (raceType !== "gold" && raceType !== "xp") {
-    return res.status(400).json({ error: 'raceType must be "gold" or "xp"' });
+  if (!VALID_RACE_TYPES.includes(raceType)) {
+    return res.status(400).json({ error: `raceType must be one of: ${VALID_RACE_TYPES.join(", ")}` });
   }
   if (typeof durationMinutes !== "number" || !Number.isFinite(durationMinutes) || durationMinutes <= 0) {
     return res.status(400).json({ error: "durationMinutes must be a positive number" });
@@ -722,8 +1217,8 @@ app.post("/api/admin/clear-race-timer", async (req, res) => {
   if (!checkAdminPassword(req, res)) return;
 
   const { raceType } = req.body || {};
-  if (raceType !== "gold" && raceType !== "xp") {
-    return res.status(400).json({ error: 'raceType must be "gold" or "xp"' });
+  if (!VALID_RACE_TYPES.includes(raceType)) {
+    return res.status(400).json({ error: `raceType must be one of: ${VALID_RACE_TYPES.join(", ")}` });
   }
 
   try {
@@ -804,6 +1299,65 @@ app.post("/api/admin/reset-xp-race", async (req, res) => {
   }
 });
 
+// WoW Forever equivalent of /api/admin/reset-gold-race.
+app.post("/api/admin/reset-gold-forever-race", async (req, res) => {
+  if (!checkAdminPassword(req, res)) return;
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(`DELETE FROM forever_characters`);
+    await client.query(`DELETE FROM forever_submissions`);
+    await client.query(
+      `INSERT INTO race_settings (race_type, ends_at, updated_at)
+       VALUES ('forever_gold', NULL, now())
+       ON CONFLICT (race_type) DO UPDATE SET ends_at = NULL, updated_at = now()`
+    );
+    await client.query("COMMIT");
+
+    console.log("Admin reset the WoW Forever gold competition.");
+    res.json({ ok: true });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("Database error:", err.message);
+    res.status(500).json({ error: "Failed to reset Forever gold competition" });
+  } finally {
+    client.release();
+  }
+});
+
+// WoW Forever equivalent of /api/admin/reset-xp-race.
+app.post("/api/admin/reset-xp-forever-race", async (req, res) => {
+  if (!checkAdminPassword(req, res)) return;
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(`DELETE FROM forever_xp_characters`);
+    await client.query(`DELETE FROM forever_xp_submissions`);
+    await client.query(
+      `INSERT INTO race_settings (race_type, ends_at, updated_at)
+       VALUES ('forever_xp', NULL, now())
+       ON CONFLICT (race_type) DO UPDATE SET ends_at = NULL, updated_at = now()`
+    );
+    await client.query(
+      `INSERT INTO forever_xp_randomizer (id, active, race, class, spin_started_at)
+       VALUES (1, false, NULL, NULL, NULL)
+       ON CONFLICT (id) DO UPDATE SET active = false, race = NULL, class = NULL, spin_started_at = NULL`
+    );
+    await client.query("COMMIT");
+
+    console.log("Admin reset the WoW Forever XP race.");
+    res.json({ ok: true });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("Database error:", err.message);
+    res.status(500).json({ error: "Failed to reset Forever XP race" });
+  } finally {
+    client.release();
+  }
+});
+
 // ---- Class/race randomizer for the XP race page --------------------------
 
 // Public: current randomizer state. The page derives its own animation
@@ -847,6 +1401,52 @@ app.post("/api/admin/spin-randomizer", async (req, res) => {
     );
 
     console.log("Admin triggered the class/race randomizer.");
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("Database error:", err.message);
+    res.status(500).json({ error: "Failed to start randomizer" });
+  }
+});
+
+// WoW Forever equivalent of /api/randomizer.
+app.get("/api/randomizer-forever", async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT active, race, class, spin_started_at FROM forever_xp_randomizer WHERE id = 1`
+    );
+
+    if (result.rows.length === 0 || !result.rows[0].active) {
+      return res.json({ ok: true, active: false });
+    }
+
+    const row = result.rows[0];
+    res.json({ ok: true, active: true, race: row.race, class: row.class, spinStartedAt: row.spin_started_at });
+  } catch (err) {
+    console.error("Database error:", err.message);
+    res.status(500).json({ error: "Failed to load randomizer state" });
+  }
+});
+
+// WoW Forever equivalent of /api/admin/spin-randomizer. Uses the same
+// combo list for now (Forever launched on the Vanilla chassis) -- edit
+// RANDOMIZER_CLASSIC_COMBOS above if Forever adds new races/classes later.
+app.post("/api/admin/spin-randomizer-forever", async (req, res) => {
+  if (!checkAdminPassword(req, res)) return;
+
+  const combo = pickRandom(RANDOMIZER_CLASSIC_COMBOS);
+  const race = combo.race;
+  const wowClass = combo.class;
+
+  try {
+    await pool.query(
+      `INSERT INTO forever_xp_randomizer (id, active, race, class, spin_started_at)
+       VALUES (1, true, $1, $2, now())
+       ON CONFLICT (id) DO UPDATE SET active = true, race = EXCLUDED.race,
+         class = EXCLUDED.class, spin_started_at = EXCLUDED.spin_started_at`,
+      [race, wowClass]
+    );
+
+    console.log("Admin triggered the WoW Forever class/race randomizer.");
     res.json({ ok: true });
   } catch (err) {
     console.error("Database error:", err.message);

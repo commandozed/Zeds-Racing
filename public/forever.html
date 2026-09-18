@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Zeds Racing — Gold</title>
+<title>Zeds Racing — Forever Gold</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
@@ -432,14 +432,14 @@
 
   <div class="page">
     <header>
-      <h1>Zeds Racing</h1>
+      <h1>Zeds Racing — WoW Forever</h1>
       <p class="subtitle" id="subtitle">Loading standings&hellip;</p>
     </header>
 
     <nav class="nav-tabs">
-      <a href="/" class="active">Gold</a>
+      <a href="/">Gold</a>
       <a href="/xp.html">Experience</a>
-      <a href="/forever.html">Forever Gold</a>
+      <a href="/forever.html" class="active">Forever Gold</a>
       <a href="/forever-xp.html">Forever XP</a>
     </nav>
 
@@ -525,7 +525,7 @@
       const body = document.getElementById('hourlyBody');
 
       try {
-        const response = await fetch('/api/leaderboard/hourly');
+        const response = await fetch('/api/leaderboard/hourly-forever');
         if (!response.ok) throw new Error('Request failed');
         const data = await response.json();
         const rows = data.hourly || [];
@@ -564,7 +564,7 @@
       const footer = document.getElementById('footer');
 
       try {
-        const response = await fetch('/api/leaderboard');
+        const response = await fetch('/api/leaderboard/gold-forever');
         if (!response.ok) throw new Error('Request failed');
         const data = await response.json();
         const rows = data.leaderboard || [];
@@ -661,7 +661,7 @@
       modalOverlay.hidden = false;
 
       try {
-        const url = '/api/history?characterName=' + encodeURIComponent(characterName) +
+        const url = '/api/history-forever?characterName=' + encodeURIComponent(characterName) +
           '&realmName=' + encodeURIComponent(realmName);
         const response = await fetch(url);
         if (!response.ok) throw new Error('Request failed');
@@ -744,7 +744,7 @@
         const response = await fetch('/api/race-settings');
         if (!response.ok) throw new Error('Request failed');
         const data = await response.json();
-        raceEndsAt = data.gold ? data.gold.endsAt : null;
+        raceEndsAt = data.forever_gold ? data.forever_gold.endsAt : null;
         tickCountdown();
       } catch (err) {
         // Leave whatever was last known rather than hiding on a blip.
